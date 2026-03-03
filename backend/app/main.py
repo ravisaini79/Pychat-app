@@ -27,7 +27,8 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "https://pychat-app-steel.vercel.app",
         "capacitor://localhost",   # 🔥 Android WebView
-        "http://localhost"         # 🔥 Fallback
+        "http://localhost"     ,    # 🔥 Fallback
+         "https://localhost"
     ],
     allow_credentials=True,
     allow_methods=["*"],
