@@ -1,5 +1,5 @@
 export const BASE_URL = ''; // Keep relative for convenience or set to backend URL
-const API_BASE = '/api';
+const API_BASE = '';
 
 function getToken() {
   return localStorage.getItem('token');
