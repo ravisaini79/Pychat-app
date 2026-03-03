@@ -1,14 +1,36 @@
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Query
+import shutil
+import os
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
 from bson import ObjectId
 
 from ..db import get_db
 from ..auth import get_current_user
-from ..schemas import MessageCreate, ConnectionRequestCreate
-from ..models import message_from_doc, conversation_id, user_from_doc
+from ..schemas import MessageCreate, ConnectionRequestCreate, GroupCreate
+from ..models import message_from_doc, conversation_id, user_from_doc, serialize_doc
 from ..websocket_manager import ws_manager
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+UPLOAD_DIR = "uploads"
+
+@router.post("/upload")
+async def upload_file(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Upload a media file and return its URL."""
+    if not os.path.exists(UPLOAD_DIR):
+        os.makedirs(UPLOAD_DIR)
+    
+    file_ext = os.path.splitext(file.filename)[1]
+    unique_filename = f"{uuid.uuid4()}{file_ext}"
+    file_path = os.path.join(UPLOAD_DIR, unique_filename)
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    return {"url": f"/uploads/{unique_filename}"}
 
 
 async def _is_connected(db, user_id: str, other_id: str) -> bool:
@@ -22,6 +44,46 @@ async def _is_connected(db, user_id: str, other_id: str) -> bool:
         }
     )
     return r is not None
+
+
+@router.post("/groups", response_model=dict)
+async def create_group(
+    body: GroupCreate,
+    current_user: dict = Depends(get_current_user),
+):
+    """Create a new group."""
+    db = get_db()
+    my_id = current_user["id"]
+    members = list(set(body.members + [my_id]))
+    
+    group_doc = {
+        "name": body.name,
+        "owner_id": my_id,
+        "members": members,
+        "created_at": datetime.utcnow(),
+    }
+    r = await db.groups.insert_one(group_doc)
+    group_doc["id"] = str(r.inserted_id)
+    
+    # Notify members via WS
+    for uid in members:
+        await ws_manager.send_to_user(uid, {
+            "event": "new_group",
+            "group": serialize_doc(group_doc)
+        })
+    
+    return serialize_doc(group_doc)
+
+
+@router.get("/groups")
+async def list_groups(current_user: dict = Depends(get_current_user)):
+    """List groups the user belongs to."""
+    db = get_db()
+    cursor = db.groups.find({"members": current_user["id"]})
+    groups = []
+    async for doc in cursor:
+        groups.append(serialize_doc(doc))
+    return groups
 
 
 @router.get("/users")
@@ -114,7 +176,13 @@ async def create_connection_request(
         "created_at": datetime.utcnow(),
     }
     r = await db.connection_requests.insert_one(doc)
-    return {"id": str(r.inserted_id), "status": "pending", "to_user_id": to_id}
+    request_id = str(r.inserted_id)
+    
+    # Broadcast to recipient
+    from_user = user_from_doc(current_user)
+    await ws_manager.broadcast_connection_request(to_id, from_user, request_id)
+    
+    return {"id": request_id, "status": "pending", "to_user_id": to_id}
 
 
 @router.get("/connection-requests")
@@ -198,24 +266,25 @@ async def reject_connection_request(
 
 @router.get("/conversations")
 async def list_conversations(current_user: dict = Depends(get_current_user)):
-    """List conversations (only with connected users) with last message preview."""
+    """Unified list of private chats and groups."""
     db = get_db()
     my_id = current_user["id"]
-    # Only conversations where connection is accepted
+    
+    # 1. Private Chats (Connected Users)
     accepted = await db.connection_requests.find(
         {
             "$or": [{"from_user_id": my_id}, {"to_user_id": my_id}],
             "status": "accepted",
         }
     ).to_list(length=500)
+    
     other_ids = set()
     for a in accepted:
-        if a["from_user_id"] == my_id:
-            other_ids.add(a["to_user_id"])
-        else:
-            other_ids.add(a["from_user_id"])
-    if not other_ids:
-        return []
+        other_ids.add(a["to_user_id"] if a["from_user_id"] == my_id else a["from_user_id"])
+
+    convos = []
+    
+    # Get last messages for private chats
     pipeline = [
         {
             "$match": {
@@ -226,18 +295,6 @@ async def list_conversations(current_user: dict = Depends(get_current_user)):
                 "deleted_at": {"$exists": False},
             }
         },
-        {
-            "$addFields": {
-                "type": {"$ifNull": ["$type", "text"]},
-                "other_id_calc": {
-                    "$cond": [
-                        {"$eq": ["$sender_id", my_id]},
-                        "$receiver_id",
-                        "$sender_id",
-                    ]
-                },
-            }
-        },
         {"$sort": {"created_at": -1}},
         {
             "$group": {
@@ -245,94 +302,149 @@ async def list_conversations(current_user: dict = Depends(get_current_user)):
                 "last_message": {"$first": "$content"},
                 "last_message_type": {"$first": "$type"},
                 "last_at": {"$first": "$created_at"},
-                "other_id": {"$first": "$other_id_calc"},
+                "sender_id": {"$first": "$sender_id"},
+                "receiver_id": {"$first": "$receiver_id"},
             }
         },
     ]
-    convos = []
+    
     async for c in db.messages.aggregate(pipeline):
-        other_id = c["other_id"]
-        if other_id not in other_ids:
-            continue
+        other_id = c["sender_id"] if c["sender_id"] != my_id else c["receiver_id"]
         other = await db.users.find_one({"_id": ObjectId(other_id)})
         if other:
-            cid = conversation_id(my_id, other_id)
-            read_doc = await db.read_marks.find_one({"user_id": my_id, "conversation_id": cid})
-            last_read = read_doc.get("last_read_at") if read_doc else None
+            cid = c["_id"]
+            last_read = await _get_last_read(db, my_id, cid)
             unread_count = await db.messages.count_documents({
                 "conversation_id": cid,
                 "receiver_id": my_id,
-                "sender_id": other_id,
-                **({"created_at": {"$gt": last_read}} if last_read else {}),
+                "created_at": {"$gt": last_read}
             })
-            last_msg = c.get("last_message")
-            last_type = c.get("last_message_type") or "text"
+            
+            last_msg = c["last_message"]
+            last_type = c["last_message_type"] or "text"
             if last_type != "text" and last_msg:
                 last_msg = _preview_for_type(last_type)
+                
+            online_ids = ws_manager.get_online_users()
             convos.append({
                 "id": other_id,
+                "type": "private",
                 "mobile": other.get("mobile", ""),
                 "name": other.get("name", "User"),
                 "avatar": other.get("avatar"),
                 "last_message": last_msg,
                 "last_message_type": last_type,
-                "last_at": c["last_at"].isoformat() if hasattr(c["last_at"], "isoformat") else str(c["last_at"]),
+                "last_at": (c["last_at"].isoformat() + "Z") if hasattr(c["last_at"], "isoformat") else str(c["last_at"]),
                 "unread_count": unread_count,
+                "is_online": other_id in online_ids,
             })
-    # Include connected users with no messages yet
+            if other_id in other_ids:
+                other_ids.remove(other_id)
+
+    # Connected users with no messages
     for oid in other_ids:
-        if not any(c["id"] == oid for c in convos):
-            other = await db.users.find_one({"_id": ObjectId(oid)})
-            if other:
-                convos.append({
-                    "id": oid,
-                    "mobile": other.get("mobile", ""),
-                    "name": other.get("name", "User"),
-                    "avatar": other.get("avatar"),
-                    "last_message": None,
-                    "last_message_type": None,
-                    "last_at": None,
-                    "unread_count": 0,
-                })
+        other = await db.users.find_one({"_id": ObjectId(oid)})
+        if other:
+            online_ids = ws_manager.get_online_users()
+            convos.append({
+                "id": oid,
+                "type": "private",
+                "mobile": other.get("mobile", ""),
+                "name": other.get("name", "User"),
+                "avatar": other.get("avatar"),
+                "last_message": None,
+                "last_message_type": None,
+                "last_at": None,
+                "unread_count": 0,
+                "is_online": oid in online_ids,
+            })
+
+    # 2. Groups
+    group_cursor = db.groups.find({"members": my_id})
+    async for group in group_cursor:
+        gid = str(group["_id"])
+        last_msg_doc = await db.messages.find_one({"group_id": gid}, sort=[("created_at", -1)])
+        
+        last_read = await _get_last_read(db, my_id, gid)
+        unread_count = await db.messages.count_documents({
+            "group_id": gid,
+            "sender_id": {"$ne": my_id},
+            "created_at": {"$gt": last_read}
+        })
+
+        last_msg = last_msg_doc["content"] if last_msg_doc else "No messages yet"
+        last_type = last_msg_doc["type"] if last_msg_doc else "text"
+        if last_type != "text" and last_msg_doc:
+            last_msg = _preview_for_type(last_type)
+
+        convos.append({
+            "id": gid,
+            "type": "group",
+            "name": group["name"],
+            "avatar": group.get("avatar"),
+            "members_count": len(group["members"]),
+            "last_message": last_msg,
+            "last_message_type": last_type,
+            "last_at": (last_msg_doc["created_at"].isoformat() + "Z") if last_msg_doc and hasattr(last_msg_doc["created_at"], "isoformat") else (group["created_at"].isoformat() + "Z" if "created_at" in group else None),
+            "unread_count": unread_count,
+            "is_online": False,
+        })
+
     convos.sort(key=lambda x: (x["last_at"] or ""), reverse=True)
     return convos
+
+
+async def _get_last_read(db, user_id: str, identifier: str) -> datetime:
+    mark = await db.read_marks.find_one({"user_id": user_id, "conversation_id": identifier})
+    return mark["last_read_at"] if mark else datetime.min
 
 
 def _preview_for_type(msg_type: str) -> str:
     return {"image": "Photo", "video": "Video", "contact": "Contact", "location": "Location"}.get(msg_type, "Message")
 
 
-@router.get("/messages/{other_user_id}")
+@router.get("/messages/{other_id}")
 async def get_messages(
-    other_user_id: str,
+    other_id: str,
     before: str | None = Query(None),
     limit: int = Query(50, ge=1, le=100),
     current_user: dict = Depends(get_current_user),
 ):
-    """Get messages with another user (only if connected). Updates read mark."""
+    """Get messages for a user or group. Updates read mark."""
     db = get_db()
     my_id = current_user["id"]
+    
+    # Try group first
+    is_group = False
     try:
-        other_oid = ObjectId(other_user_id)
+        group = await db.groups.find_one({"_id": ObjectId(other_id), "members": my_id})
+        is_group = group is not None
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid user id")
-    connected = await _is_connected(db, my_id, other_user_id)
-    if not connected:
-        raise HTTPException(status_code=403, detail="Connect with this user first")
-    cid = conversation_id(my_id, other_user_id)
-    match = {"conversation_id": cid, "deleted_at": {"$exists": False}}
+        pass
+
+    if is_group:
+        cid = other_id
+        match = {"group_id": other_id, "deleted_at": {"$exists": False}}
+    else:
+        connected = await _is_connected(db, my_id, other_id)
+        if not connected:
+            raise HTTPException(status_code=403, detail="Connect with this user first")
+        cid = conversation_id(my_id, other_id)
+        match = {"conversation_id": cid, "deleted_at": {"$exists": False}}
+
     if before:
-        match["_id"] = {"$lt": ObjectId(before)}
-    cursor = (
-        db.messages.find(match)
-        .sort("created_at", -1)
-        .limit(limit)
-    )
+        try:
+            match["_id"] = {"$lt": ObjectId(before)}
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid before ID")
+
+    cursor = db.messages.find(match).sort("created_at", -1).limit(limit)
     messages = []
     async for doc in cursor:
         if "type" not in doc:
             doc["type"] = "text"
         messages.append(message_from_doc(doc))
+
     # Mark as read
     now = datetime.utcnow()
     await db.read_marks.update_one(
@@ -348,39 +460,73 @@ async def send_message(
     body: MessageCreate,
     current_user: dict = Depends(get_current_user),
 ):
-    """Send a message (only if connected). type: text | image | contact | location | video."""
+    """Send a message to a user or group."""
     db = get_db()
     my_id = current_user["id"]
-    try:
-        receiver_oid = ObjectId(body.receiver_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid receiver id")
-    receiver = await db.users.find_one({"_id": receiver_oid})
-    if not receiver:
-        raise HTTPException(status_code=404, detail="User not found")
-    connected = await _is_connected(db, my_id, body.receiver_id)
-    if not connected:
-        raise HTTPException(status_code=403, detail="Connect with this user first")
+    
     msg_type = (body.type or "text").lower()
     if msg_type not in ("text", "image", "contact", "location", "video"):
         msg_type = "text"
     content = body.content.strip() if body.content else ""
     if msg_type == "text" and not content:
         raise HTTPException(status_code=400, detail="Content required for text message")
-    cid = conversation_id(my_id, body.receiver_id)
+
     doc = {
         "sender_id": my_id,
-        "receiver_id": body.receiver_id,
         "type": msg_type,
         "content": content,
-        "conversation_id": cid,
+        "created_at": datetime.utcnow(),
     }
-    doc["created_at"] = datetime.utcnow()
-    r = await db.messages.insert_one(doc)
-    doc["_id"] = r.inserted_id
-    msg_out = message_from_doc(doc)
-    await ws_manager.broadcast_new_message(body.receiver_id, msg_out)
-    return msg_out
+
+    if body.group_id:
+        # Send to group
+        try:
+            group = await db.groups.find_one({"_id": ObjectId(body.group_id), "members": my_id})
+            if not group:
+                raise HTTPException(status_code=403, detail="Not a member of this group")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid group id")
+        
+        doc["group_id"] = body.group_id
+        r = await db.messages.insert_one(doc)
+        doc["_id"] = r.inserted_id
+        msg_out = message_from_doc(doc)
+        
+        # Broadcast to all group members
+        for uid in group["members"]:
+            await ws_manager.send_to_user(uid, {
+                "event": "new_message",
+                "message": msg_out
+            })
+        return msg_out
+
+    elif body.receiver_id:
+        # Send User to User
+        try:
+            receiver_oid = ObjectId(body.receiver_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid receiver id")
+        
+        receiver = await db.users.find_one({"_id": receiver_oid})
+        if not receiver:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        connected = await _is_connected(db, my_id, body.receiver_id)
+        if not connected:
+            raise HTTPException(status_code=403, detail="Connect with this user first")
+        
+        cid = conversation_id(my_id, body.receiver_id)
+        doc["receiver_id"] = body.receiver_id
+        doc["conversation_id"] = cid
+        
+        r = await db.messages.insert_one(doc)
+        doc["_id"] = r.inserted_id
+        msg_out = message_from_doc(doc)
+        
+        await ws_manager.broadcast_new_message(my_id, body.receiver_id, msg_out)
+        return msg_out
+    else:
+        raise HTTPException(status_code=400, detail="receiver_id or group_id required")
 
 
 @router.delete("/messages/{message_id}")

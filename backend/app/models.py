@@ -12,7 +12,7 @@ def serialize_doc(doc: dict) -> dict:
         out["id"] = str(out.pop("_id"))
     for k, v in out.items():
         if isinstance(v, datetime):
-            out[k] = v.isoformat()
+            out[k] = v.isoformat() + "Z"
         elif isinstance(v, ObjectId):
             out[k] = str(v)
     return out

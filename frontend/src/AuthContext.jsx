@@ -12,25 +12,26 @@ export function AuthProvider({ children }) {
     const saved = localStorage.getItem('user');
     if (token && saved) {
       try {
-        setUser(JSON.parse(saved));
-      } catch (_) {}
+        const u = JSON.parse(saved);
+        setUser({ ...u, token });
+      } catch (_) { }
     }
     setLoading(false);
   }, []);
 
-  const login = async (mobile) => {
-    const data = await apiLogin(mobile);
+  const login = async (mobile, password) => {
+    const data = await apiLogin(mobile, password);
     localStorage.setItem('token', data.access_token);
     localStorage.setItem('user', JSON.stringify(data.user));
-    setUser(data.user);
+    setUser({ ...data.user, token: data.access_token });
     return data.user;
   };
 
-  const registerUser = async (mobile, name, imageFile = null) => {
-    const data = await apiRegister(mobile, name, imageFile);
+  const registerUser = async (mobile, name, password, email, imageFile = null) => {
+    const data = await apiRegister(mobile, name, password, email, imageFile);
     localStorage.setItem('token', data.access_token);
     localStorage.setItem('user', JSON.stringify(data.user));
-    setUser(data.user);
+    setUser({ ...data.user, token: data.access_token });
     return data.user;
   };
 

@@ -1,4 +1,5 @@
-const API_BASE = 'https://pychat-app.onrender.com';
+export const BASE_URL = ''; // Keep relative for convenience or set to backend URL
+const API_BASE = '/api';
 
 function getToken() {
   return localStorage.getItem('token');
@@ -17,10 +18,12 @@ export async function api(url, options = {}) {
   return data;
 }
 
-export async function register(mobile, name = '', imageFile = null) {
+export async function register(mobile, name = '', password = '', email = '', imageFile = null) {
   const body = new FormData();
   body.append('mobile', mobile.trim());
   body.append('name', (name || '').trim() || 'User');
+  body.append('password', password);
+  body.append('email', email.trim());
   if (imageFile && imageFile instanceof File) {
     body.append('image', imageFile);
   }
@@ -31,10 +34,10 @@ export async function register(mobile, name = '', imageFile = null) {
   return data;
 }
 
-export async function login(mobile) {
+export async function login(mobile, password) {
   const data = await api('/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ mobile: mobile.trim() }),
+    body: JSON.stringify({ mobile: mobile.trim(), password }),
   });
   return data;
 }

@@ -1,3 +1,4 @@
+import json
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..auth import decode_token
@@ -20,8 +21,17 @@ async def websocket_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket, user_id)
     try:
         while True:
-            await websocket.receive_text()
+            raw_data = await websocket.receive_text()
+            try:
+                data = json.loads(raw_data)
+                event = data.get("event")
+                if event == "webrtc_signal":
+                    await ws_manager.handle_webrtc_signal(user_id, data)
+                # Handle other WS events here if needed
+            except Exception:
+                # Ignore malformed JSON or errors during processing
+                pass
     except WebSocketDisconnect:
         pass
     finally:
-        ws_manager.disconnect(websocket, user_id)
+        await ws_manager.disconnect(websocket, user_id)

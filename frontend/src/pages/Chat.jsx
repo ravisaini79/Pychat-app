@@ -1,530 +1,889 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../AuthContext';
-import {
-  listConversations,
-  listUsers,
-  listConnectionRequests,
-  sendConnectionRequest,
-  acceptConnectionRequest,
-  rejectConnectionRequest,
-  getMessages,
-  sendMessage as apiSendMessage,
-  deleteMessage as apiDeleteMessage,
-  reactToMessage as apiReactToMessage,
-} from '../api';
-import { useWebSocket } from '../useWebSocket';
+import { api, BASE_URL } from '../api';
+import useWebSocket from '../useWebSocket';
+import CallOverlay from './CallOverlay';
 import './Chat.css';
 
-function Avatar({ user, className = '' }) {
-  if (user?.avatar) {
-    return <img src={user.avatar} alt="" className={`avatar-img ${className}`} />;
-  }
-  return (
-    <span className={`avatar-initial ${className}`}>
-      {user?.name?.charAt(0) || '?'}
-    </span>
-  );
-}
-
-const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
-
-function MessageBubble({ msg, isSent, onDelete, onReact }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [reactOpen, setReactOpen] = useState(false);
-  const type = msg.type || 'text';
-  const isDeleted = msg.deleted_at;
-  const reactions = msg.reactions && typeof msg.reactions === 'object' ? Object.values(msg.reactions) : [];
-
-  const content = () => {
-    if (type === 'image') {
-      return (
-        <div className="message-bubble message-media">
-          <img src={msg.content} alt="Shared" className="msg-image" />
-        </div>
-      );
-    }
-    if (type === 'video') {
-      return (
-        <div className="message-bubble message-media">
-          <video src={msg.content} controls className="msg-video" />
-        </div>
-      );
-    }
-    if (type === 'contact') {
-      try {
-        const c = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content;
-        return (
-          <div className="message-bubble message-contact">
-            <span className="msg-contact-name">{c.name || 'Contact'}</span>
-            <a href={`tel:${c.number || ''}`} className="msg-contact-number">{c.number || ''}</a>
-          </div>
-        );
-      } catch (_) {
-        return <div className="message-bubble">{msg.content}</div>;
-      }
-    }
-    if (type === 'location') {
-      try {
-        const loc = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content;
-        const url = `https://www.google.com/maps?q=${loc.lat},${loc.lng}`;
-        return (
-          <div className="message-bubble message-location">
-            <a href={url} target="_blank" rel="noopener noreferrer" className="msg-location-link">
-              {loc.label || 'Location'}
-            </a>
-            <span className="msg-location-coords">{loc.lat?.toFixed(4)}, {loc.lng?.toFixed(4)}</span>
-          </div>
-        );
-      } catch (_) {
-        return <div className="message-bubble">{msg.content}</div>;
-      }
-    }
-    return <div className="message-bubble">{msg.content}</div>;
-  };
-
-  if (isDeleted) {
-    return (
-      <div className="message-bubble message-deleted">
-        <em>This message was deleted</em>
-      </div>
-    );
-  }
-
-  return (
-    <div className="message-bubble-wrap">
-      <div
-        className="message-touch-area"
-        onClick={() => { setMenuOpen(false); setReactOpen(false); }}
-        onContextMenu={(e) => { e.preventDefault(); setMenuOpen(true); setReactOpen(false); }}
-      >
-        {content()}
-        {reactions.length > 0 && (
-          <div className="message-reactions">
-            {reactions.map((em, i) => (
-              <span key={i} className="msg-emoji">{em}</span>
-            ))}
-          </div>
-        )}
-      </div>
-      {(menuOpen || reactOpen) && (
-        <div className="message-menu">
-          {reactOpen ? (
-            <div className="message-menu-emojis">
-              {QUICK_EMOJIS.map((em) => (
-                <button key={em} type="button" className="msg-emoji-btn" onClick={() => { onReact?.(em); setReactOpen(false); setMenuOpen(false); }}>{em}</button>
-              ))}
-            </div>
-          ) : (
-            <>
-              <button type="button" onClick={() => { setMenuOpen(false); setReactOpen(true); }}>React</button>
-              {isSent && onDelete && <button type="button" onClick={() => { onDelete?.(); setMenuOpen(false); }}>Delete</button>}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function formatTime(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const now = new Date();
-  if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
+const REACTION_EMOJIS = ['❤️', '😂', '😮', '😢', '🙏', '👍'];
 
 export default function Chat() {
   const { user, logout } = useAuth();
+  const [activeTab, setActiveTab] = useState('chats'); // 'chats', 'contacts', 'requests'
   const [conversations, setConversations] = useState([]);
-  const [connectionRequests, setConnectionRequests] = useState({ incoming: [], outgoing: [] });
-  const [selectedUser, setSelectedUser] = useState(null);
+  const [globalUsers, setGlobalUsers] = useState([]);
+  const [pendingRequests, setPendingRequests] = useState([]);
+  const [selectedConvo, setSelectedConvo] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
+  const [newMessage, setNewMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [attachOpen, setAttachOpen] = useState(false);
-  const [contactModal, setContactModal] = useState(false);
-  const [contactName, setContactName] = useState('');
-  const [contactNumber, setContactNumber] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [reactionMenu, setReactionMenu] = useState(null); // { messageId, x, y }
+  const [attachmentMenu, setAttachmentMenu] = useState(false);
+  const [showContactPicker, setShowContactPicker] = useState(false);
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [selectedMembers, setSelectedMembers] = useState([]); // Array of user objects
+  const [groupName, setGroupName] = useState('');
+
+  const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const videoInputRef = useRef(null);
-  const messagesEndRef = useRef(null);
-  const pollRef = useRef(null);
+  const { lastMessage, sendJson } = useWebSocket(user?.token);
 
-  const loadConversations = async () => {
-    try {
-      const list = await listConversations();
-      setConversations(list);
-    } catch (_) {}
+  // ── WebRTC States ──
+  const [callStatus, setCallStatus] = useState('idle'); // 'idle' | 'calling' | 'incoming' | 'active'
+  const [localStream, setLocalStream] = useState(null);
+  const [remoteStream, setRemoteStream] = useState(null);
+  const pcRef = useRef(null); // PeerConnection
+  const iceCandidatesQueue = useRef([]);
+
+  const configuration = {
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
   };
 
-  const loadConnectionRequests = async () => {
+  const initPeerConnection = () => {
+    const pc = new RTCPeerConnection(configuration);
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate && selectedConvo) {
+        sendJson({
+          event: "webrtc_signal",
+          to: selectedConvo.type === 'private' ? selectedConvo.id : null,
+          group_id: selectedConvo.type === 'group' ? selectedConvo.id : null,
+          signal: { type: 'candidate', candidate: event.candidate }
+        });
+      }
+    };
+
+    pc.ontrack = (event) => {
+      setRemoteStream(event.streams[0]);
+    };
+
+    pcRef.current = pc;
+    return pc;
+  };
+
+  const startLocalStream = async () => {
     try {
-      const data = await listConnectionRequests();
-      setConnectionRequests({ incoming: data.incoming || [], outgoing: data.outgoing || [] });
-    } catch (_) {}
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      setLocalStream(stream);
+      return stream;
+    } catch (err) {
+      console.error('Failed to get media devices:', err);
+      return null;
+    }
+  };
+
+  const initiateCall = async () => {
+    if (!selectedConvo) return;
+    setCallStatus('calling');
+    const stream = await startLocalStream();
+    if (!stream) return;
+
+    const pc = initPeerConnection();
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    sendJson({
+      event: "webrtc_signal",
+      to: selectedConvo.type === 'private' ? selectedConvo.id : null,
+      group_id: selectedConvo.type === 'group' ? selectedConvo.id : null,
+      signal: { type: 'offer', sdp: offer.sdp }
+    });
+  };
+
+  const handleIncomingCall = async (fromId, signal, groupId) => {
+    // Only auto-show if we are idle
+    if (callStatus !== 'idle') return;
+    setCallStatus('incoming');
+    // Store signaling data to process after acceptance
+    pcRef.current_signal = signal;
+    pcRef.current_from = fromId;
+    pcRef.current_group_id = groupId;
+    iceCandidatesQueue.current = []; // Reset queue for new call
+  };
+
+  const acceptCall = async () => {
+    const stream = await startLocalStream();
+    if (!stream) return;
+
+    const pc = initPeerConnection();
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+    const signal = pcRef.current_signal;
+    await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    sendJson({
+      event: "webrtc_signal",
+      to: pcRef.current_from,
+      group_id: pcRef.current_group_id,
+      signal: { type: 'answer', sdp: answer.sdp }
+    });
+
+    // Process any queued candidates that arrived before acceptance
+    iceCandidatesQueue.current.forEach(cand => {
+      pc.addIceCandidate(new RTCIceCandidate(cand)).catch(e => console.error("Error adding queued candidate", e));
+    });
+    iceCandidatesQueue.current = [];
+
+    setCallStatus('active');
+  };
+
+  const endCall = () => {
+    if (pcRef.current) pcRef.current.close();
+    if (localStream) localStream.getTracks().forEach(t => t.stop());
+    pcRef.current = null;
+    setLocalStream(null);
+    setRemoteStream(null);
+    setCallStatus('idle');
+  };
+
+  // ── Fetch Initial Data ──
+  const fetchConversations = async () => {
+    try {
+      const data = await api('/chat/conversations');
+      setConversations(data);
+      if (selectedConvo) {
+        const updated = data.find(c => c.id === selectedConvo.id);
+        if (updated) setSelectedConvo(prev => ({ ...prev, ...updated }));
+      }
+    } catch (err) {
+      console.error('Failed to fetch convos:', err);
+    }
+  };
+
+  const fetchPendingRequests = async () => {
+    try {
+      const data = await api('/chat/connection-requests');
+      setPendingRequests(data.incoming || []);
+    } catch (err) {
+      console.error('Failed to fetch requests:', err);
+    }
   };
 
   useEffect(() => {
-    loadConversations();
-    loadConnectionRequests();
-  }, []);
+    async function init() {
+      if (!user) return;
+      setLoading(true);
+      await Promise.all([fetchConversations(), fetchPendingRequests()]);
+      setLoading(false);
+    }
+    init();
+  }, [user]);
 
+  // ── Global User Search ──
   useEffect(() => {
-    if (!selectedUser) {
-      setMessages([]);
+    if (activeTab !== 'contacts' || searchQuery.length < 2) {
+      setGlobalUsers([]);
       return;
     }
-    if (selectedUser.connection_status !== 'connected') return;
-    let cancelled = false;
-    setLoading(true);
-    getMessages(selectedUser.id)
-      .then((list) => {
-        if (!cancelled) setMessages(list);
-      })
-      .catch(() => { if (!cancelled) setMessages([]); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [selectedUser?.id, selectedUser?.connection_status]);
+    const delayDebounceFn = setTimeout(async () => {
+      try {
+        const data = await api(`/chat/users?q=${searchQuery}`);
+        setGlobalUsers(data);
+      } catch (err) {
+        console.error('Search failed:', err);
+      }
+    }, 400);
 
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchQuery, activeTab]);
+
+  // ── Fetch Messages when convo changes ──
   useEffect(() => {
-    if (!selectedUser || selectedUser.connection_status !== 'connected') return;
-    pollRef.current = setInterval(() => {
-      getMessages(selectedUser.id).then(setMessages).catch(() => {});
-      loadConversations();
-    }, 3000);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [selectedUser?.id, selectedUser?.connection_status]);
+    async function fetchMessages() {
+      if (!selectedConvo) return;
+      try {
+        const data = await api(`/chat/messages/${selectedConvo.id}`);
+        setMessages(data);
+      } catch (err) {
+        console.error('Failed to fetch messages:', err);
+      }
+    }
+    fetchMessages();
+  }, [selectedConvo?.id]);
 
+  // ── Handle incoming WebSocket events ──
+  useEffect(() => {
+    if (!lastMessage) return;
+
+    if (lastMessage.event === 'new_message') {
+      const msg = lastMessage.message;
+      const isCurrentConvo = selectedConvo && (
+        (msg.group_id && msg.group_id === selectedConvo.id) ||
+        (!msg.group_id && (msg.sender_id === selectedConvo.id || msg.receiver_id === selectedConvo.id))
+      );
+
+      if (isCurrentConvo) {
+        setMessages((prev) => {
+          const exists = prev.some(m => m.id === msg.id);
+          if (exists) return prev;
+          return [...prev, msg];
+        });
+      }
+      fetchConversations();
+    }
+    else if (lastMessage.event === 'new_group') {
+      fetchConversations();
+    }
+    else if (lastMessage.event === 'new_connection_request') {
+      fetchPendingRequests();
+    }
+    else if (lastMessage.event === 'connection_accepted') {
+      fetchConversations();
+    }
+    else if (lastMessage.event === 'message_reacted') {
+      const { message_id, reactions } = lastMessage;
+      setMessages(prev => prev.map(m =>
+        m.id === message_id ? { ...m, reactions } : m
+      ));
+    }
+    else if (lastMessage.event === 'user_presence') {
+      const { user_id, status } = lastMessage;
+      setConversations(prev => prev.map(c =>
+        c.id === user_id ? { ...c, is_online: status === 'online' } : c
+      ));
+      if (selectedConvo?.id === user_id) {
+        setSelectedConvo(prev => ({ ...prev, is_online: status === 'online' }));
+      }
+    }
+    else if (lastMessage.event === 'webrtc_signal') {
+      const { from, signal, group_id } = lastMessage;
+      if (signal.type === 'offer') {
+        handleIncomingCall(from, signal, group_id);
+      } else if (signal.type === 'answer') {
+        if (pcRef.current) {
+          pcRef.current.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
+          // Process queued candidates
+          iceCandidatesQueue.current.forEach(cand => {
+            pcRef.current.addIceCandidate(new RTCIceCandidate(cand)).catch(e => console.error("Error adding queued candidate", e));
+          });
+          iceCandidatesQueue.current = [];
+        }
+      } else if (signal.type === 'candidate') {
+        if (pcRef.current && pcRef.current.remoteDescription) {
+          pcRef.current.addIceCandidate(new RTCIceCandidate(signal.candidate)).catch(e => console.error("Error adding candidate", e));
+        } else {
+          iceCandidatesQueue.current.push(signal.candidate);
+        }
+      }
+    }
+  }, [lastMessage, selectedConvo?.id, callStatus]);
+
+  // ── Scroll to bottom ──
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSearch = async (q) => {
-    setSearchQuery(q);
-    if (q.length < 2) {
-      setSearchResults([]);
-      return;
+  // ── Filtering Conversations (Search) ──
+  const filteredConvos = useMemo(() => {
+    if (activeTab !== 'chats') return [];
+    return conversations.filter(c =>
+      c.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      c.mobile?.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [conversations, searchQuery, activeTab]);
+
+  const handleSendMessage = async (e, type = 'text', contentString = null) => {
+    if (e) e.preventDefault();
+    if (!selectedConvo) return;
+
+    const content = contentString || newMessage.trim();
+    if (type === 'text' && !content) return;
+    if (type === 'text') setNewMessage('');
+
+    const now = new Date().toISOString();
+    const tempId = 'temp-' + Date.now();
+
+    const tempMsg = {
+      id: tempId,
+      sender_id: user.id,
+      receiver_id: selectedConvo.type === 'private' ? selectedConvo.id : null,
+      group_id: selectedConvo.type === 'group' ? selectedConvo.id : null,
+      content: content,
+      type: type,
+      created_at: now,
+      status: 'sending'
+    };
+    setMessages(prev => [...prev, tempMsg]);
+
+    try {
+      const sentMsg = await api('/chat/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+          receiver_id: selectedConvo.type === 'private' ? selectedConvo.id : null,
+          group_id: selectedConvo.type === 'group' ? selectedConvo.id : null,
+          content: content,
+          type: type
+        })
+      });
+
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...sentMsg, status: 'sent' } : m));
+      fetchConversations();
+    } catch (err) {
+      console.error('Send failed:', err);
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m));
     }
+  };
+
+  const toggleMemberSelection = (u) => {
+    setSelectedMembers(prev => {
+      const exists = prev.find(m => m.id === u.id);
+      if (exists) return prev.filter(m => m.id !== u.id);
+      return [...prev, u];
+    });
+  };
+
+  const handleCreateGroup = async () => {
+    if (!groupName.trim() || selectedMembers.length === 0) return;
     try {
-      const list = await listUsers(q);
-      setSearchResults(list);
-    } catch (_) {
-      setSearchResults([]);
+      const g = await api('/chat/groups', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: groupName,
+          members: selectedMembers.map(m => m.id)
+        })
+      });
+      setShowCreateGroup(false);
+      setGroupName('');
+      setSelectedMembers([]);
+      fetchConversations();
+      setSelectedConvo({ ...g, type: 'group' });
+    } catch (err) {
+      alert('Failed to create group');
     }
   };
 
-  const selectUser = (u) => {
-    setSelectedUser(u);
-    setSearchQuery('');
-    setSearchResults([]);
-    setSidebarOpen(false);
-  };
+  const handleFileUpload = async (event, type) => {
+    const file = event.target.files[0];
+    if (!file) return;
 
-  const handleSendRequest = async (u) => {
+    setAttachmentMenu(false);
+
+    // 1. Upload file
+    const formData = new FormData();
+    formData.append('file', file);
+
     try {
-      await sendConnectionRequest(u.id);
-      const list = await listUsers(searchQuery);
-      setSearchResults(list);
-      loadConnectionRequests();
-    } catch (_) {}
-  };
+      const { url } = await api('/chat/upload', {
+        method: 'POST',
+        body: formData
+      });
 
-  const handleAccept = async (r) => {
-    try {
-      const data = await acceptConnectionRequest(r.id);
-      loadConnectionRequests();
-      await loadConversations();
-      if (data.user) {
-        selectUser({ ...data.user, connection_status: 'connected' });
-      }
-    } catch (_) {}
-  };
-
-  const handleReject = async (requestId) => {
-    try {
-      await rejectConnectionRequest(requestId);
-      loadConnectionRequests();
-    } catch (_) {}
-  };
-
-  const sendTextMessage = async (e) => {
-    e.preventDefault();
-    if (!input.trim() || !selectedUser || sending) return;
-    if (selectedUser.connection_status !== 'connected') return;
-    setSending(true);
-    try {
-      const msg = await apiSendMessage(selectedUser.id, input.trim(), 'text');
-      setMessages((prev) => [...prev, msg]);
-      setInput('');
-      loadConversations();
-    } catch (_) {}
-    finally { setSending(false); }
-  };
-
-  const sendMediaMessage = async (type, content) => {
-    if (!selectedUser || sending) return;
-    setSending(true);
-    setAttachOpen(false);
-    try {
-      const msg = await apiSendMessage(selectedUser.id, content, type);
-      setMessages((prev) => [...prev, msg]);
-      loadConversations();
-    } catch (_) {}
-    finally { setSending(false); }
-  };
-
-  const onImageSelect = (e) => {
-    const file = e.target.files?.[0];
-    if (file && file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = () => sendMediaMessage('image', reader.result);
-      reader.readAsDataURL(file);
+      // 2. Send message with URL
+      await handleSendMessage(null, type, url);
+    } catch (err) {
+      alert('Upload failed: ' + err.message);
     }
-    e.target.value = '';
   };
 
-  const onVideoSelect = (e) => {
-    const file = e.target.files?.[0];
-    if (file && (file.type.startsWith('video/') || file.type === 'video/mp4')) {
-      const reader = new FileReader();
-      reader.onload = () => sendMediaMessage('video', reader.result);
-      reader.readAsDataURL(file);
-    }
-    e.target.value = '';
-  };
-
-  const sendContact = () => {
-    if (!contactName.trim() && !contactNumber.trim()) return;
-    sendMediaMessage('contact', JSON.stringify({ name: contactName.trim(), number: contactNumber.trim() }));
-    setContactModal(false);
-    setContactName('');
-    setContactNumber('');
-  };
-
-  const sendLocation = () => {
+  const handleShareLocation = () => {
+    setAttachmentMenu(false);
     if (!navigator.geolocation) {
-      alert('Location not supported');
+      alert('Geolocation is not supported by your browser');
       return;
     }
-    setAttachOpen(false);
+
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        sendMediaMessage('location', JSON.stringify({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          label: 'My location',
-        }));
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        const locationJson = JSON.stringify({ lat: latitude, lng: longitude });
+        handleSendMessage(null, 'location', locationJson);
       },
-      () => alert('Could not get location'),
+      () => {
+        alert('Unable to retrieve your location');
+      }
     );
   };
 
-  const incomingCount = connectionRequests.incoming?.length || 0;
+  const handleShareContact = (targetUser) => {
+    setShowContactPicker(false);
+    const contactJson = JSON.stringify({
+      id: targetUser.id,
+      name: targetUser.name,
+      mobile: targetUser.mobile,
+      avatar: targetUser.avatar
+    });
+    handleSendMessage(null, 'contact', contactJson);
+  };
+
+  const handleConnect = async (targetUserId) => {
+    try {
+      await api('/chat/connection-request', {
+        method: 'POST',
+        body: JSON.stringify({ to_user_id: targetUserId })
+      });
+      const data = await api(`/chat/users?q=${searchQuery}`);
+      setGlobalUsers(data);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleAcceptRequest = async (requestId, fromUser) => {
+    try {
+      await api(`/chat/connection-request/${requestId}/accept`, { method: 'POST' });
+      await Promise.all([fetchConversations(), fetchPendingRequests()]);
+
+      const newConvo = {
+        id: fromUser.id,
+        name: fromUser.name,
+        avatar: fromUser.avatar,
+        mobile: fromUser.mobile,
+        is_online: true,
+        type: 'private'
+      };
+      setSelectedConvo(newConvo);
+      setActiveTab('chats');
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleMessageAction = (e, messageId) => {
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    setReactionMenu({
+      messageId,
+      x: rect.left + rect.width / 2,
+      y: rect.top - 40
+    });
+  };
+
+  const addReaction = async (emoji) => {
+    if (!reactionMenu) return;
+    const { messageId } = reactionMenu;
+    setReactionMenu(null);
+
+    try {
+      const data = await api(`/chat/messages/${messageId}/react?emoji=${encodeURIComponent(emoji)}`, {
+        method: 'POST'
+      });
+      setMessages(prev => prev.map(m =>
+        m.id === messageId ? { ...m, reactions: data.reactions } : m
+      ));
+    } catch (err) {
+      console.error('Reaction failed:', err);
+    }
+  };
+
+  const formatTime = (ts) => {
+    if (!ts) return '';
+    const date = new Date(ts);
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+  };
+
+  const renderMessageContent = (msg) => {
+    switch (msg.type) {
+      case 'image':
+        return (
+          <div className="media-container">
+            <img src={`${BASE_URL}${msg.content}`} className="message-image" alt="Shared" />
+            <a href={`${BASE_URL}${msg.content}`} download className="btn-download" title="Download">⬇️</a>
+          </div>
+        );
+      case 'video':
+        return (
+          <div className="media-container">
+            <video controls className="message-video">
+              <source src={`${BASE_URL}${msg.content}`} />
+              Your browser does not support the video tag.
+            </video>
+            <a href={`${BASE_URL}${msg.content}`} download className="btn-download" title="Download">⬇️</a>
+          </div>
+        );
+      case 'location':
+        try {
+          const loc = JSON.parse(msg.content);
+          const mapUrl = `https://www.google.com/maps?q=${loc.lat},${loc.lng}`;
+          return (
+            <a href={mapUrl} target="_blank" rel="noopener noreferrer" className="message-location">
+              <div className="location-icon">📍</div>
+              <div className="location-text">
+                <strong>Current Location</strong>
+                <span>{loc.lat.toFixed(4)}, {loc.lng.toFixed(4)}</span>
+              </div>
+            </a>
+          );
+        } catch (_) { return msg.content; }
+      case 'contact':
+        try {
+          const contact = JSON.parse(msg.content);
+          return (
+            <div className="message-contact">
+              <img src={contact.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} alt={contact.name} />
+              <div className="contact-info">
+                <strong>{contact.name}</strong>
+                <span>{contact.mobile}</span>
+              </div>
+              <button
+                className="btn-chat-contact"
+                onClick={() => {
+                  const existing = conversations.find(c => c.id === contact.id);
+                  if (existing) setSelectedConvo(existing);
+                  else setSelectedConvo({ ...contact, is_online: false, type: 'private' });
+                }}
+              >
+                Message
+              </button>
+            </div>
+          );
+        } catch (_) { return msg.content; }
+      default:
+        return <div className="message-text">{msg.content}</div>;
+    }
+  };
+
+  if (loading) return <div className="app-loading">Loading PyChat...</div>;
 
   return (
-    <div className="chat-layout wa-theme">
-      <aside className={`chat-sidebar ${sidebarOpen ? 'open' : ''}`}>
-        <div className="sidebar-header">
+    <div className={`chat-layout ${selectedConvo ? 'chat-selected' : ''}`} onClick={() => { setReactionMenu(null); setAttachmentMenu(false); }}>
+
+      {/* ── Sidebar ── */}
+      <aside className="chat-sidebar">
+        <header className="sidebar-header">
           <div className="sidebar-user">
-            <Avatar user={user} className="sidebar-avatar" />
-            <div className="sidebar-user-info">
-              <strong>{user?.name || 'User'}</strong>
-              <span className="sidebar-mobile">{user?.mobile}</span>
-            </div>
+            <img
+              src={user?.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'}
+              className="sidebar-avatar"
+              alt="Profile"
+            />
+            <button className="btn-icon btn-new-group-plus" title="New Group" onClick={() => setShowCreateGroup(true)}>➕</button>
           </div>
           <div className="sidebar-header-actions">
-            <button type="button" className="btn-menu btn-icon" onClick={() => setSidebarOpen(false)} aria-label="Close">×</button>
-            <button type="button" className="btn-logout" onClick={logout}>Logout</button>
+            <button
+              className={`btn-icon ${activeTab === 'chats' ? 'active' : ''}`}
+              onClick={() => { setActiveTab('chats'); setSearchQuery(''); }}
+            >
+              💬
+            </button>
+            <button
+              className={`btn-icon ${activeTab === 'contacts' ? 'active' : ''}`}
+              onClick={() => { setActiveTab('contacts'); setSearchQuery(''); }}
+            >
+              👥
+            </button>
+            <button
+              className={`btn-icon ${activeTab === 'requests' ? 'active' : ''} btn-requests-tab`}
+              onClick={() => { setActiveTab('requests'); setSearchQuery(''); }}
+            >
+              📩
+              {pendingRequests.length > 0 && <span className="tab-badge">{pendingRequests.length}</span>}
+            </button>
+            <button className="btn-icon" onClick={logout}>🚪</button>
+          </div>
+        </header>
+
+        <div className="sidebar-search">
+          <div className="search-input-wrap">
+            <span>🔍</span>
+            <input
+              type="text"
+              placeholder={activeTab === 'chats' ? "Search chats" : "Search mobile or name"}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
           </div>
         </div>
-        <div className="sidebar-search">
-          <input
-            type="text"
-            placeholder="Search by mobile or name"
-            value={searchQuery}
-            onChange={(e) => handleSearch(e.target.value)}
-          />
-        </div>
 
-        {incomingCount > 0 && (
-          <div className="sidebar-section connection-requests-section">
-            <h3 className="sidebar-section-title">
-              Requests <span className="notification-badge">{incomingCount}</span>
-            </h3>
-            <div className="request-list">
-              {connectionRequests.incoming.map((r) => (
-                <div key={r.id} className="request-item">
-                  <Avatar user={r.from_user} className="convo-avatar" />
-                  <div className="request-info">
-                    <span className="convo-name">{r.from_user?.name}</span>
-                    <span className="convo-mobile">{r.from_user?.mobile}</span>
+        <div className="sidebar-content">
+          <div className="sidebar-section-title">
+            {activeTab === 'chats' ? 'RECENT CHATS' : activeTab === 'contacts' ? 'FIND PEOPLE' : 'PENDING REQUESTS'}
+          </div>
+
+          {activeTab === 'chats' && (
+            filteredConvos.length > 0 ? (
+              filteredConvos.map((convo) => (
+                <button
+                  key={convo.id}
+                  className={`convo-item ${selectedConvo?.id === convo.id ? 'active' : ''}`}
+                  onClick={() => setSelectedConvo(convo)}
+                >
+                  <div className="avatar-wrap">
+                    <img src={convo.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} className="convo-avatar" alt={convo.name} />
+                    {convo.is_online && <span className="online-dot"></span>}
                   </div>
-                  <div className="request-actions">
-                    <button type="button" className="btn-accept" onClick={() => handleAccept(r)}>Accept</button>
-                    <button type="button" className="btn-reject" onClick={() => handleReject(r.id)}>Reject</button>
+                  <div className="convo-info">
+                    <div className="convo-name-wrap">
+                      <span className="convo-name">{convo.name || convo.mobile}</span>
+                      <span className="convo-time">{convo.last_at ? formatTime(convo.last_at) : ''}</span>
+                    </div>
+                    <div className="convo-preview-wrap">
+                      <span className="convo-preview">{convo.last_message || 'No messages yet'}</span>
+                      {convo.unread_count > 0 && <span className="unread-badge">{convo.unread_count}</span>}
+                    </div>
+                  </div>
+                </button>
+              ))
+            ) : (
+              <p className="no-results">No chats found</p>
+            )
+          )}
+
+          {activeTab === 'contacts' && (
+            searchQuery.length < 2 ? (
+              <p className="no-results">Type at least 2 characters to search</p>
+            ) : globalUsers.map((u) => (
+              <div key={u.id} className="convo-item contact-item">
+                <img src={u.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} className="convo-avatar" alt={u.name} />
+                <div className="convo-info">
+                  <div className="convo-name-wrap"><span className="convo-name">{u.name}</span></div>
+                  <div className="convo-preview">{u.mobile}</div>
+                </div>
+                <div className="contact-actions">
+                  {u.connection_status === 'none' && <button className="btn-connect" onClick={() => handleConnect(u.id)}>Connect</button>}
+                  {u.connection_status === 'pending_sent' && <span className="status-label">Requested</span>}
+                  {u.connection_status === 'pending_received' && <span className="status-label">Accept in Requests</span>}
+                  {u.connection_status === 'connected' && (
+                    <button className="btn-chat-now" onClick={() => { setActiveTab('chats'); setSelectedConvo({ ...u, type: 'private' }); }}>Chat</button>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+
+          {activeTab === 'requests' && (
+            pendingRequests.length === 0 ? (
+              <p className="no-results">No pending requests</p>
+            ) : (
+              pendingRequests.map((req) => (
+                <div key={req.id} className="convo-item contact-item">
+                  <img src={req.from_user.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} className="convo-avatar" alt={req.from_user.name} />
+                  <div className="convo-info">
+                    <div className="convo-name-wrap"><span className="convo-name">{req.from_user.name}</span></div>
+                    <div className="convo-preview">{req.from_user.mobile}</div>
+                  </div>
+                  <div className="contact-actions">
+                    <button className="btn-connect" onClick={() => handleAcceptRequest(req.id, req.from_user)}>Accept</button>
+                  </div>
+                </div>
+              ))
+            )
+          )}
+        </div>
+      </aside>
+
+      {/* ── Main Chat ── */}
+      <main className="chat-main">
+        {selectedConvo ? (
+          <>
+            <header className="chat-header">
+              <button className="btn-icon btn-back" onClick={() => setSelectedConvo(null)}>←</button>
+              <div className="avatar-wrap">
+                <img src={selectedConvo.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} className="convo-avatar" alt={selectedConvo.name} />
+                {selectedConvo.is_online && <span className="online-dot"></span>}
+              </div>
+              <div className="chat-header-info">
+                <span className="chat-header-name">{selectedConvo.name || selectedConvo.mobile}</span>
+                <span className="chat-header-status">
+                  {selectedConvo.type === 'group' ? `${selectedConvo.members_count || 0} members` : (selectedConvo.is_online ? 'online' : 'offline')}
+                </span>
+              </div>
+              <div className="sidebar-header-actions">
+                <button className="btn-icon" title="Video Call" onClick={initiateCall}>📹</button>
+                <button className="btn-icon" title="Voice Call">📞</button>
+                <button className="btn-icon">🔍</button>
+                <button className="btn-icon">⋮</button>
+              </div>
+            </header>
+
+            <div className="chat-messages">
+              {messages.map((msg) => (
+                <div
+                  key={msg.id}
+                  className={`message-wrap ${msg.sender_id === user.id ? 'sent' : 'received'} ${msg.status === 'sending' ? 'msg-sending' : ''} type-${msg.type}`}
+                  onContextMenu={(e) => handleMessageAction(e, msg.id)}
+                >
+                  <div className="message-bubble">
+                    <div className="message-content-wrap">
+                      {renderMessageContent(msg)}
+                    </div>
+
+                    {msg.reactions && Object.keys(msg.reactions).length > 0 && (
+                      <div className="message-reactions">
+                        {Object.values(msg.reactions).map((emoji, idx) => (
+                          <span key={idx} className="reaction-emoji">{emoji}</span>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="message-meta">
+                      <span className="message-time">{formatTime(msg.created_at)}</span>
+                      {msg.sender_id === user.id && (
+                        <span className={`message-status ${msg.status || ''}`}>
+                          {msg.status === 'sending' ? '🕒' : msg.status === 'failed' ? '⚠️' : '✓✓'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
+              <div ref={messagesEndRef} />
             </div>
+
+            <form className="chat-input-form" onSubmit={(e) => handleSendMessage(e)}>
+              <div className="input-actions">
+                <button type="button" className="btn-icon">😊</button>
+                <div className="attachment-wrap">
+                  <button
+                    type="button"
+                    className={`btn-icon ${attachmentMenu ? 'active' : ''}`}
+                    onClick={(e) => { e.stopPropagation(); setAttachmentMenu(!attachmentMenu); }}
+                  >
+                    📎
+                  </button>
+                  {attachmentMenu && (
+                    <div className="attachment-menu" onClick={(e) => e.stopPropagation()}>
+                      <button className="attach-btn" onClick={() => fileInputRef.current.click()}>
+                        <span className="attach-icon image">🖼️</span>
+                        <span>Gallery</span>
+                      </button>
+                      <button className="attach-btn" onClick={() => videoInputRef.current.click()}>
+                        <span className="attach-icon video">📹</span>
+                        <span>Video</span>
+                      </button>
+                      <button className="attach-btn" onClick={handleShareLocation}>
+                        <span className="attach-icon location">📍</span>
+                        <span>Location</span>
+                      </button>
+                      <button className="attach-btn" onClick={() => setShowContactPicker(true)}>
+                        <span className="attach-icon contact">👤</span>
+                        <span>Contact</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="chat-input-wrap">
+                <input
+                  type="text"
+                  className="chat-input"
+                  placeholder="Type a message"
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                />
+              </div>
+
+              <button type="submit" className="btn-send" disabled={!newMessage.trim()}>
+                {newMessage.trim() ? '➤' : '🎤'}
+              </button>
+
+              <input type="file" hidden ref={fileInputRef} accept="image/*" onChange={(e) => handleFileUpload(e, 'image')} />
+              <input type="file" hidden ref={videoInputRef} accept="video/*" onChange={(e) => handleFileUpload(e, 'video')} />
+            </form>
+          </>
+        ) : (
+          <div className="chat-empty">
+            <div className="empty-icon">📱</div>
+            <h1 className="empty-title">PyChat Web</h1>
+            <p className="empty-text">
+              Send and receive messages without keeping your phone online. <br />
+              Use PyChat on up to 4 linked devices and 1 phone at the same time.
+            </p>
           </div>
         )}
 
-        {searchResults.length > 0 && (
-          <div className="sidebar-section search-results">
-            <h3 className="sidebar-section-title">Search</h3>
-            {searchResults.map((u) => (
-              <div key={u.id} className="convo-item-wrap">
-                <button
-                  type="button"
-                  className={`convo-item ${selectedUser?.id === u.id ? 'active' : ''}`}
-                  onClick={() => selectUser(u)}
-                >
-                  <Avatar user={u} className="convo-avatar" />
-                  <div className="convo-info">
-                    <span className="convo-name">{u.name}</span>
-                    <span className="convo-mobile">{u.mobile}</span>
-                  </div>
-                  {u.connection_status === 'connected' && <span className="status-tag connected">Chat</span>}
-                  {u.connection_status === 'pending_sent' && <span className="status-tag pending">Pending</span>}
-                  {u.connection_status === 'pending_received' && <span className="status-tag received">Accept above</span>}
-                  {u.connection_status === 'none' && (
-                    <button type="button" className="btn-connect" onClick={(e) => { e.stopPropagation(); handleSendRequest(u); }}>Connect</button>
-                  )}
-                </button>
-              </div>
+        {/* Reaction Menu Overlay */}
+        {reactionMenu && (
+          <div
+            className="reaction-menu"
+            style={{ left: reactionMenu.x, top: reactionMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {REACTION_EMOJIS.map(emoji => (
+              <button key={emoji} onClick={() => addReaction(emoji)}>{emoji}</button>
             ))}
           </div>
         )}
 
-        <div className="sidebar-section convo-list">
-          <h3 className="sidebar-section-title">Chats</h3>
-          {conversations.length === 0 && searchResults.length === 0 && (
-            <p className="sidebar-empty">No chats yet. Search and send a connection request.</p>
-          )}
-          {conversations.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              className={`convo-item ${selectedUser?.id === c.id ? 'active' : ''}`}
-              onClick={() => selectUser({ ...c, connection_status: 'connected' })}
-            >
-              <div className="convo-avatar-wrap">
-                <Avatar user={c} className="convo-avatar" />
-                {c.unread_count > 0 && <span className="unread-badge">{c.unread_count > 99 ? '99+' : c.unread_count}</span>}
+        {/* Contact Picker Modal */}
+        {showContactPicker && (
+          <div className="contact-picker-overlay" onClick={() => setShowContactPicker(false)}>
+            <div className="contact-picker-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h3>Share Contact</h3>
+                <button onClick={() => setShowContactPicker(false)}>✕</button>
               </div>
-              <div className="convo-info">
-                <span className="convo-name">{c.name}</span>
-                <span className="convo-preview">{c.last_message || 'No messages yet'}</span>
+              <div className="modal-body">
+                {conversations.map(c => (
+                  <button key={c.id} className="picker-item" onClick={() => handleShareContact(c)}>
+                    <img src={c.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} alt={c.name} />
+                    <strong>{c.name}</strong>
+                  </button>
+                ))}
               </div>
-              <span className="convo-time">{formatTime(c.last_at)}</span>
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      <button type="button" className="btn-menu btn-menu-open" onClick={() => setSidebarOpen(true)} aria-label="Menu">
-        <span className="hamburger" />
-      </button>
-
-      <main className="chat-main">
-        {selectedUser ? (
-          selectedUser.connection_status === 'connected' ? (
-            <>
-              <div className="chat-header">
-                <button type="button" className="btn-back" onClick={() => setSidebarOpen(true)} aria-label="Back">‹</button>
-                <Avatar user={selectedUser} className="chat-header-avatar" />
-                <div className="chat-header-info">
-                  <strong>{selectedUser.name}</strong>
-                  <span className="chat-header-mobile">{selectedUser.mobile}</span>
-                </div>
-              </div>
-              <div className="chat-messages">
-                {loading ? (
-                  <div className="messages-loading">Loading…</div>
-                ) : (
-                  messages.map((m) => (
-                    <div key={m.id} className={`message ${m.sender_id === user?.id ? 'sent' : 'received'}`}>
-                      <MessageBubble msg={m} isSent={m.sender_id === user?.id} />
-                    </div>
-                  ))
-                )}
-                <div ref={messagesEndRef} />
-              </div>
-              <form className="chat-input-form" onSubmit={sendTextMessage}>
-                <div className="attach-wrap">
-                  <button type="button" className="btn-attach" onClick={() => setAttachOpen(!attachOpen)} aria-label="Attach">⊕</button>
-                  {attachOpen && (
-                    <div className="attach-menu">
-                      <button type="button" onClick={() => { fileInputRef.current?.click(); }}>
-                        Photo
-                      </button>
-                      <button type="button" onClick={() => { videoInputRef.current?.click(); }}>
-                        Video
-                      </button>
-                      <button type="button" onClick={() => { setAttachOpen(false); setContactModal(true); }}>
-                        Contact
-                      </button>
-                      <button type="button" onClick={sendLocation}>
-                        Location
-                      </button>
-                    </div>
-                  )}
-                  <input ref={fileInputRef} type="file" accept="image/*" onChange={onImageSelect} className="hidden-input" />
-                  <input ref={videoInputRef} type="file" accept="video/*" onChange={onVideoSelect} className="hidden-input" />
-                </div>
-                <input
-                  type="text"
-                  placeholder="Message"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  disabled={sending}
-                  className="chat-input"
-                />
-                <button type="submit" className="btn-send" disabled={sending || !input.trim()} aria-label="Send">➤</button>
-              </form>
-            </>
-          ) : (
-            <div className="chat-empty chat-connect-prompt">
-              <p>
-                {selectedUser.connection_status === 'pending_sent'
-                  ? 'Request sent. Wait for them to accept.'
-                  : selectedUser.connection_status === 'pending_received'
-                    ? 'Accept their request in the Requests section.'
-                    : 'Send a connection request to chat.'}
-              </p>
-              {selectedUser.connection_status === 'none' && (
-                <button type="button" className="btn-connect-large" onClick={() => handleSendRequest(selectedUser)}>Send request</button>
-              )}
             </div>
-          )
-        ) : (
-          <div className="chat-empty">
-            <p>Open a chat from the list or search and send a connection request.</p>
           </div>
         )}
       </main>
-
-      {contactModal && (
-        <div className="modal-overlay" onClick={() => setContactModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h3>Share contact</h3>
-            <input type="text" placeholder="Name" value={contactName} onChange={(e) => setContactName(e.target.value)} />
-            <input type="tel" placeholder="Number" value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} />
-            <div className="modal-actions">
-              <button type="button" onClick={() => setContactModal(false)}>Cancel</button>
-              <button type="button" className="btn-primary" onClick={sendContact}>Send</button>
+      {/* ── Group Creation Modal ── */}
+      {showCreateGroup && (
+        <div className="contact-picker-overlay">
+          <div className="contact-picker-modal">
+            <div className="modal-header">
+              <h3>Create New Group</h3>
+              <button className="btn-icon" onClick={() => setShowCreateGroup(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <input
+                type="text"
+                className="group-name-input"
+                placeholder="Group Name"
+                value={groupName}
+                onChange={(e) => setGroupName(e.target.value)}
+              />
+              <div className="member-selection-list">
+                <p className="section-label">Select Members</p>
+                {conversations.filter(c => c.type === 'private').map(u => (
+                  <div
+                    key={u.id}
+                    className={`picker-item ${selectedMembers.find(m => m.id === u.id) ? 'selected' : ''}`}
+                    onClick={() => toggleMemberSelection(u)}
+                  >
+                    <img src={u.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} alt={u.name} />
+                    <div className="convo-info">
+                      <div className="convo-name">{u.name}</div>
+                    </div>
+                    <div className="selection-check">
+                      {selectedMembers.find(m => m.id === u.id) ? '✅' : '○'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn-create-final"
+                disabled={!groupName.trim() || selectedMembers.length === 0}
+                onClick={handleCreateGroup}
+              >
+                Create Group ({selectedMembers.length})
+              </button>
             </div>
           </div>
         </div>
+      )}
+      {/* ── Call Overlay ── */}
+      {callStatus !== 'idle' && (
+        <CallOverlay
+          onEnd={endCall}
+          localStream={localStream}
+          remoteStream={remoteStream}
+          isIncoming={callStatus === 'incoming'}
+          onAccept={acceptCall}
+          callerName={
+            callStatus === 'incoming'
+              ? (conversations.find(c => c.id === pcRef.current_from)?.name || 'User')
+              : (selectedConvo?.name || 'User')
+          }
+        />
       )}
     </div>
   );

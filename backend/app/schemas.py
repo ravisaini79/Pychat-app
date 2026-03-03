@@ -1,13 +1,17 @@
 from pydantic import BaseModel, Field
+from typing import Optional
 
 
 class UserRegister(BaseModel):
     mobile: str = Field(..., min_length=10, max_length=15)
     name: str = Field("", max_length=100)
+    password: str = Field(..., min_length=6, max_length=128)
+    email: str = Field(..., min_length=5, max_length=200)
 
 
 class UserLogin(BaseModel):
     mobile: str = Field(..., min_length=10, max_length=15)
+    password: str = Field(..., min_length=1)
 
 
 class Token(BaseModel):
@@ -24,9 +28,15 @@ class UserOut(BaseModel):
 
 
 class MessageCreate(BaseModel):
-    receiver_id: str
+    receiver_id: Optional[str] = None
+    group_id: Optional[str] = None
     type: str = "text"  # text | image | contact | location | video
-    content: str = Field("", max_length=500_000)  # text or base64/data URL or JSON for contact/location
+    content: str = Field("", max_length=500_000)
+
+
+class GroupCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    members: list[str] = [] # list of user ids
 
 
 class MessageOut(BaseModel):
@@ -51,3 +61,19 @@ class ConversationPartner(BaseModel):
 
 class ConnectionRequestCreate(BaseModel):
     to_user_id: str
+
+
+# ---------- Forgot Password ----------
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(..., min_length=5)
+
+
+class VerifyOTPRequest(BaseModel):
+    email: str = Field(..., min_length=5)
+    otp: str = Field(..., min_length=6, max_length=6)
+
+
+class ResetPasswordRequest(BaseModel):
+    reset_token: str = Field(...)
+    new_password: str = Field(..., min_length=6, max_length=128)
