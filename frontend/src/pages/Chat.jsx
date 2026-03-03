@@ -9,7 +9,7 @@ const REACTION_EMOJIS = ['❤️', '😂', '😮', '😢', '🙏', '👍'];
 
 export default function Chat() {
   const { user, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState('chats'); // 'chats', 'contacts', 'requests'
+  const [activeTab, setActiveTab] = useState('chats'); // 'chats', 'contacts', 'requests', 'calls'
   const [conversations, setConversations] = useState([]);
   const [globalUsers, setGlobalUsers] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
@@ -29,6 +29,8 @@ export default function Chat() {
   const fileInputRef = useRef(null);
   const videoInputRef = useRef(null);
   const { lastMessage, sendJson } = useWebSocket(user?.token);
+  const ringtoneRef = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3')); // Professional ringing sound
+  ringtoneRef.current.loop = true;
 
   // ── WebRTC States ──
   const [callStatus, setCallStatus] = useState('idle'); // 'idle' | 'calling' | 'incoming' | 'active'
@@ -74,8 +76,16 @@ export default function Chat() {
     }
   };
 
-  const initiateCall = async () => {
-    if (!selectedConvo) return;
+  const initiateCall = async (target = null) => {
+    const convo = target || selectedConvo;
+    if (!convo) return;
+
+    // Switch view to the user we are calling if we are in another tab
+    if (target && target.id !== selectedConvo?.id) {
+      setSelectedConvo(target);
+      setActiveTab('chats');
+    }
+
     setCallStatus('calling');
     const stream = await startLocalStream();
     if (!stream) return;
@@ -88,21 +98,34 @@ export default function Chat() {
 
     sendJson({
       event: "webrtc_signal",
-      to: selectedConvo.type === 'private' ? selectedConvo.id : null,
-      group_id: selectedConvo.type === 'group' ? selectedConvo.id : null,
+      to: convo.type === 'private' ? convo.id : null,
+      group_id: convo.type === 'group' ? convo.id : null,
       signal: { type: 'offer', sdp: offer.sdp }
     });
+
+    // Send a persistent chat message about the call
+    handleSendMessage(null, 'call', 'Video Call');
   };
 
   const handleIncomingCall = async (fromId, signal, groupId) => {
     // Only auto-show if we are idle
     if (callStatus !== 'idle') return;
+    console.log("WS: Processing incoming call from", fromId, "Group:", groupId);
     setCallStatus('incoming');
     // Store signaling data to process after acceptance
     pcRef.current_signal = signal;
     pcRef.current_from = fromId;
     pcRef.current_group_id = groupId;
     iceCandidatesQueue.current = []; // Reset queue for new call
+
+    // Browser Notification
+    if (Notification.permission === 'granted') {
+      const caller = conversations.find(c => c.id === fromId)?.name || 'Someone';
+      new Notification("Incoming Video Call", {
+        body: `${caller} is calling you on PyChat`,
+        icon: '/favicon.ico'
+      });
+    }
   };
 
   const acceptCall = async () => {
@@ -172,6 +195,11 @@ export default function Chat() {
       setLoading(true);
       await Promise.all([fetchConversations(), fetchPendingRequests()]);
       setLoading(false);
+
+      // Request Notification Permission
+      if (Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
     }
     init();
   }, [user]);
@@ -254,6 +282,7 @@ export default function Chat() {
     }
     else if (lastMessage.event === 'webrtc_signal') {
       const { from, signal, group_id } = lastMessage;
+      console.log("WS: WebRTC Signal Received", signal.type, "from", from);
       if (signal.type === 'offer') {
         handleIncomingCall(from, signal, group_id);
       } else if (signal.type === 'answer') {
@@ -274,6 +303,38 @@ export default function Chat() {
       }
     }
   }, [lastMessage, selectedConvo?.id, callStatus]);
+
+  // Handle Ringing Sound
+  useEffect(() => {
+    if (callStatus === 'incoming') {
+      ringtoneRef.current.play().catch(e => console.log("Audio play blocked", e));
+    } else {
+      ringtoneRef.current.pause();
+      ringtoneRef.current.currentTime = 0;
+    }
+    return () => {
+      ringtoneRef.current.pause();
+    };
+  }, [callStatus]);
+
+  // ── Call History Extraction ──
+  const callHistory = useMemo(() => {
+    const allCalls = [];
+    conversations.forEach(convo => {
+      // Note: We'd ideally pull from a global call log, but using convo metadata for now
+      // If messages are available, we can filter them. 
+      // For a real "Calls" tab, the backend usually provides a dedicated endpoint.
+      // We'll simulate it by finding the last 'call' message in each convo if it exists.
+      if (convo.last_message && convo.last_message.type === 'call') {
+        allCalls.push({
+          ...convo,
+          call_time: convo.last_message.created_at,
+          is_missed: convo.last_message.sender_id !== user.id // Simple heuristic
+        });
+      }
+    });
+    return allCalls.sort((a, b) => new Date(b.call_time) - new Date(a.call_time));
+  }, [conversations, user.id]);
 
   // ── Scroll to bottom ──
   useEffect(() => {
@@ -512,6 +573,29 @@ export default function Chat() {
             </a>
           );
         } catch (_) { return msg.content; }
+      case 'call':
+        const isSelf = msg.sender_id === user.id;
+        // Only show JOIN if this specific call is currently incoming
+        const isCurrentIncoming = !isSelf && callStatus === 'incoming' && pcRef.current_from === msg.sender_id;
+
+        return (
+          <div className="message-call">
+            <div className="call-info">
+              <span className={`call-icon ${!isSelf ? 'missed' : ''}`}>📹</span>
+              <div className="call-text">
+                <strong>Video Call</strong>
+                <span>{isSelf ? 'Outgoing' : 'Incoming'}</span>
+              </div>
+            </div>
+            {isCurrentIncoming ? (
+              <button className="btn-call-join" onClick={acceptCall}>Join</button>
+            ) : (
+              <button className="btn-call-join btn-call-back" onClick={() => initiateCall(conversations.find(c => c.id === (isSelf ? msg.receiver_id : msg.sender_id)))}>
+                Call Back
+              </button>
+            )}
+          </div>
+        );
       case 'contact':
         try {
           const contact = JSON.parse(msg.content);
@@ -575,6 +659,13 @@ export default function Chat() {
             >
               📩
               {pendingRequests.length > 0 && <span className="tab-badge">{pendingRequests.length}</span>}
+            </button>
+            <button
+              className={`btn-icon ${activeTab === 'calls' ? 'active' : ''}`}
+              onClick={() => { setActiveTab('calls'); setSearchQuery(''); }}
+              title="Call History"
+            >
+              📞
             </button>
             <button className="btn-icon" onClick={logout}>🚪</button>
           </div>
@@ -660,8 +751,32 @@ export default function Chat() {
                     <div className="convo-preview">{req.from_user.mobile}</div>
                   </div>
                   <div className="contact-actions">
-                    <button className="btn-connect" onClick={() => handleAcceptRequest(req.id, req.from_user)}>Accept</button>
+                    <button className="btn-accept" onClick={() => handleAcceptRequest(req.id, req.from_user)}>Accept</button>
                   </div>
+                </div>
+              ))
+            )
+          )}
+
+          {activeTab === 'calls' && (
+            callHistory.length === 0 ? (
+              <p className="no-results">No call history</p>
+            ) : (
+              callHistory.map((call, idx) => (
+                <div key={idx} className="convo-item call-history-item">
+                  <img src={call.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} className="convo-avatar" alt={call.name} />
+                  <div className="convo-info">
+                    <div className="convo-name-wrap">
+                      <span className="convo-name">{call.name || call.mobile}</span>
+                      <span className="convo-time">{formatTime(call.call_time)}</span>
+                    </div>
+                    <div className="convo-preview-wrap">
+                      <span className={`convo-preview ${call.is_missed ? 'missed' : ''}`}>
+                        {call.is_missed ? '↙ Missed' : '↗ Outgoing'}
+                      </span>
+                    </div>
+                  </div>
+                  <button className="btn-call-back-sidebar" onClick={() => initiateCall(call)}>📞</button>
                 </div>
               ))
             )
@@ -788,103 +903,112 @@ export default function Chat() {
               Use PyChat on up to 4 linked devices and 1 phone at the same time.
             </p>
           </div>
-        )}
+        )
+        }
 
         {/* Reaction Menu Overlay */}
-        {reactionMenu && (
-          <div
-            className="reaction-menu"
-            style={{ left: reactionMenu.x, top: reactionMenu.y }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {REACTION_EMOJIS.map(emoji => (
-              <button key={emoji} onClick={() => addReaction(emoji)}>{emoji}</button>
-            ))}
-          </div>
-        )}
+        {
+          reactionMenu && (
+            <div
+              className="reaction-menu"
+              style={{ left: reactionMenu.x, top: reactionMenu.y }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {REACTION_EMOJIS.map(emoji => (
+                <button key={emoji} onClick={() => addReaction(emoji)}>{emoji}</button>
+              ))}
+            </div>
+          )
+        }
 
         {/* Contact Picker Modal */}
-        {showContactPicker && (
-          <div className="contact-picker-overlay" onClick={() => setShowContactPicker(false)}>
-            <div className="contact-picker-modal" onClick={(e) => e.stopPropagation()}>
+        {
+          showContactPicker && (
+            <div className="contact-picker-overlay" onClick={() => setShowContactPicker(false)}>
+              <div className="contact-picker-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h3>Share Contact</h3>
+                  <button onClick={() => setShowContactPicker(false)}>✕</button>
+                </div>
+                <div className="modal-body">
+                  {conversations.map(c => (
+                    <button key={c.id} className="picker-item" onClick={() => handleShareContact(c)}>
+                      <img src={c.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} alt={c.name} />
+                      <strong>{c.name}</strong>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )
+        }
+      </main >
+      {/* ── Group Creation Modal ── */}
+      {
+        showCreateGroup && (
+          <div className="contact-picker-overlay">
+            <div className="contact-picker-modal">
               <div className="modal-header">
-                <h3>Share Contact</h3>
-                <button onClick={() => setShowContactPicker(false)}>✕</button>
+                <h3>Create New Group</h3>
+                <button className="btn-icon" onClick={() => setShowCreateGroup(false)}>✕</button>
               </div>
               <div className="modal-body">
-                {conversations.map(c => (
-                  <button key={c.id} className="picker-item" onClick={() => handleShareContact(c)}>
-                    <img src={c.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} alt={c.name} />
-                    <strong>{c.name}</strong>
-                  </button>
-                ))}
+                <input
+                  type="text"
+                  className="group-name-input"
+                  placeholder="Group Name"
+                  value={groupName}
+                  onChange={(e) => setGroupName(e.target.value)}
+                />
+                <div className="member-selection-list">
+                  <p className="section-label">Select Members</p>
+                  {conversations.filter(c => c.type === 'private').map(u => (
+                    <div
+                      key={u.id}
+                      className={`picker-item ${selectedMembers.find(m => m.id === u.id) ? 'selected' : ''}`}
+                      onClick={() => toggleMemberSelection(u)}
+                    >
+                      <img src={u.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} alt={u.name} />
+                      <div className="convo-info">
+                        <div className="convo-name">{u.name}</div>
+                      </div>
+                      <div className="selection-check">
+                        {selectedMembers.find(m => m.id === u.id) ? '✅' : '○'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button
+                  className="btn-create-final"
+                  disabled={!groupName.trim() || selectedMembers.length === 0}
+                  onClick={handleCreateGroup}
+                >
+                  Create Group ({selectedMembers.length})
+                </button>
               </div>
             </div>
           </div>
-        )}
-      </main>
-      {/* ── Group Creation Modal ── */}
-      {showCreateGroup && (
-        <div className="contact-picker-overlay">
-          <div className="contact-picker-modal">
-            <div className="modal-header">
-              <h3>Create New Group</h3>
-              <button className="btn-icon" onClick={() => setShowCreateGroup(false)}>✕</button>
-            </div>
-            <div className="modal-body">
-              <input
-                type="text"
-                className="group-name-input"
-                placeholder="Group Name"
-                value={groupName}
-                onChange={(e) => setGroupName(e.target.value)}
-              />
-              <div className="member-selection-list">
-                <p className="section-label">Select Members</p>
-                {conversations.filter(c => c.type === 'private').map(u => (
-                  <div
-                    key={u.id}
-                    className={`picker-item ${selectedMembers.find(m => m.id === u.id) ? 'selected' : ''}`}
-                    onClick={() => toggleMemberSelection(u)}
-                  >
-                    <img src={u.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} alt={u.name} />
-                    <div className="convo-info">
-                      <div className="convo-name">{u.name}</div>
-                    </div>
-                    <div className="selection-check">
-                      {selectedMembers.find(m => m.id === u.id) ? '✅' : '○'}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button
-                className="btn-create-final"
-                disabled={!groupName.trim() || selectedMembers.length === 0}
-                onClick={handleCreateGroup}
-              >
-                Create Group ({selectedMembers.length})
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+        )
+      }
       {/* ── Call Overlay ── */}
-      {callStatus !== 'idle' && (
-        <CallOverlay
-          onEnd={endCall}
-          localStream={localStream}
-          remoteStream={remoteStream}
-          isIncoming={callStatus === 'incoming'}
-          onAccept={acceptCall}
-          callerName={
-            callStatus === 'incoming'
-              ? (conversations.find(c => c.id === pcRef.current_from)?.name || 'User')
-              : (selectedConvo?.name || 'User')
-          }
-        />
-      )}
+      {
+        callStatus !== 'idle' && (
+          <CallOverlay
+            onEnd={endCall}
+            localStream={localStream}
+            remoteStream={remoteStream}
+            isIncoming={callStatus === 'incoming'}
+            onAccept={acceptCall}
+            callerName={
+              callStatus === 'incoming'
+                ? (conversations.find(c => c.id === pcRef.current_from)?.name || 'User')
+                : (selectedConvo?.name || 'User')
+            }
+          />
+        )
+      }
     </div>
   );
 }

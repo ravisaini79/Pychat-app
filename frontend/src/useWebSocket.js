@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 
 function getWsUrl() {
-  const base = window.location.origin.replace(/^http/, 'ws');
-  const path = '/api/ws';
-  return `${base}${path}`;
+  return 'wss://pychat-app.onrender.com/ws';
 }
 
 export default function useWebSocket(token) {
@@ -62,7 +60,7 @@ export default function useWebSocket(token) {
     };
   }, [connect]);
 
-  const sendMessage = useCallback((data) => {
+  const sendJson = useCallback((data) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(data));
     } else {
@@ -70,5 +68,5 @@ export default function useWebSocket(token) {
     }
   }, []);
 
-  return { lastMessage, sendMessage, ws: wsRef.current };
+  return { lastMessage, sendJson, ws: wsRef.current };
 }

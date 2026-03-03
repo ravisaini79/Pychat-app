@@ -46,7 +46,7 @@ export default function CallOverlay({
     return (
         <div className="call-overlay">
             <div className="call-container">
-                {isIncoming && !remoteStream ? (
+                {isIncoming ? (
                     <div className="incoming-call-alert">
                         <div className="caller-info">
                             <div className="caller-avatar">👤</div>
