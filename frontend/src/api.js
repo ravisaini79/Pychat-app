@@ -1,4 +1,4 @@
-const API_BASE = '/api';
+const API_BASE = 'https://pychat-app.onrender.com';
 
 function getToken() {
   return localStorage.getItem('token');
