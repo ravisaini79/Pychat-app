@@ -18,9 +18,17 @@ app = FastAPI(
     title="AI Chat API",
     lifespan=lifespan,
 )
+from fastapi.middleware.cors import CORSMiddleware
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173","https://pychat-app-steel.vercel.app"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://pychat-app-steel.vercel.app",
+        "capacitor://localhost",   # 🔥 Android WebView
+        "http://localhost"         # 🔥 Fallback
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
