@@ -1,5 +1,5 @@
 export const BASE_URL = ''; // Keep relative for convenience or set to backend URL
-const API_BASE = '';
+const API_BASE = 'https://pychat-app.onrender.com';
 
 function getToken() {
   return localStorage.getItem('token');
