@@ -1,0 +1,80 @@
+<ion-header class="ion-no-border">
+  <ion-toolbar color="primary">
+    <ion-title>Settings</ion-title>
+    <ion-buttons slot="end">
+      <ion-button>
+        <ion-icon slot="icon-only" name="search-outline"></ion-icon>
+      </ion-button>
+      <ion-button>
+        <ion-icon slot="icon-only" name="ellipsis-vertical"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content>
+  <input type="file" accept="image/*" #fileInput (change)="onFileSelected($event)" style="display: none;">
+
+  <ion-list lines="none">
+    <ion-item class="profile-header">
+      <div slot="start" style="position: relative;" (click)="triggerUpload()">
+        <app-avatar [src]="user?.avatar" [name]="user?.name || 'User'" [size]="64"></app-avatar>
+        <div class="camera-badge">
+          <ion-icon name="camera-outline"></ion-icon>
+        </div>
+      </div>
+      <div class="profile-info">
+        <div class="edit-row name-row" (click)="editName()">
+          <h2>{{ user?.name || 'Loading...' }}</h2>
+          <ion-icon name="pencil-outline" class="edit-icon"></ion-icon>
+        </div>
+        <div class="edit-row about-row" (click)="editAbout()">
+          <p>{{ user?.about || 'Hey there! I am using TalkSpot.' }}</p>
+          <ion-icon name="pencil-outline" class="edit-icon"></ion-icon>
+        </div>
+      </div>
+    </ion-item>
+
+    <div class="divider"></div>
+
+    <ion-item button>
+      <ion-icon slot="start" name="person-outline" color="medium"></ion-icon>
+      <ion-label>
+        <h2>Account</h2>
+        <p>Security notifications</p>
+      </ion-label>
+    </ion-item>
+
+    <ion-item button>
+      <ion-icon slot="start" name="lock-closed-outline" color="medium"></ion-icon>
+      <ion-label>
+        <h2>Privacy</h2>
+        <p>Block contacts, disappearing messages</p>
+      </ion-label>
+    </ion-item>
+
+    <ion-item button>
+      <ion-icon slot="start" name="notifications-outline" color="medium"></ion-icon>
+      <ion-label>
+        <h2>Notifications</h2>
+        <p>Message, group & call tones</p>
+      </ion-label>
+    </ion-item>
+
+    <ion-item button>
+      <ion-icon slot="start" name="document-text-outline" color="medium"></ion-icon>
+      <ion-label>
+        <h2>Storage and Data</h2>
+        <p>Network usage, auto-download</p>
+      </ion-label>
+    </ion-item>
+
+    <ion-item button>
+      <ion-icon slot="start" name="help-circle-outline" color="medium"></ion-icon>
+      <ion-label>
+        <h2>Help</h2>
+        <p>Help center, contact us, privacy policy</p>
+      </ion-label>
+    </ion-item>
+  </ion-list>
+</ion-content>

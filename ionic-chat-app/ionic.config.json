@@ -1,0 +1,7 @@
+{
+  "name": "TalkSpot",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "angular-standalone"
+}

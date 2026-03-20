@@ -1,0 +1,74 @@
+<ion-content [fullscreen]="true">
+  <div class="register-wrapper">
+    <div class="header-section">
+      <ion-buttons slot="start">
+        <ion-back-button defaultHref="/login" text="" color="primary"></ion-back-button>
+      </ion-buttons>
+      <h1>Profile Info</h1>
+      <p>Please provide your name and an optional profile photo</p>
+    </div>
+
+    <div class="profile-upload-section">
+      <div class="avatar-container" (click)="fileInput.click()">
+        <img [src]="profilePreview || '/assets/avatars/default.png'" />
+        <div class="camera-overlay">
+          <ion-icon name="camera"></ion-icon>
+        </div>
+      </div>
+      <input #fileInput type="file" (change)="onFileSelected($event)" accept="image/*" style="display: none;" />
+    </div>
+
+    <div class="form-container">
+      <ion-item lines="none" class="custom-item">
+        <ion-icon name="person-outline" slot="start"></ion-icon>
+        <ion-input
+          type="text"
+          placeholder="Type your name here"
+          [(ngModel)]="fullName"
+          name="fullName"
+        ></ion-input>
+      </ion-item>
+
+      <ion-item lines="none" class="custom-item">
+        <ion-icon name="call-outline" slot="start"></ion-icon>
+        <ion-input
+          type="tel"
+          placeholder="Phone number"
+          [(ngModel)]="mobile"
+          name="mobile"
+          maxlength="10"
+        ></ion-input>
+      </ion-item>
+
+      <ion-item lines="none" class="custom-item">
+        <ion-icon name="information-circle-outline" slot="start"></ion-icon>
+        <ion-input
+          type="text"
+          placeholder="About (Bio)"
+          [(ngModel)]="about"
+          name="about"
+        ></ion-input>
+      </ion-item>
+
+      <ion-item lines="none" class="custom-item">
+        <ion-icon name="lock-closed-outline" slot="start"></ion-icon>
+        <ion-input
+          [type]="showPassword ? 'text' : 'password'"
+          placeholder="Password"
+          [(ngModel)]="password"
+          name="password"
+        ></ion-input>
+        <ion-button fill="clear" slot="end" (click)="togglePassword()">
+          <ion-icon [name]="showPassword ? 'eye-off-outline' : 'eye-outline'"></ion-icon>
+        </ion-button>
+      </ion-item>
+
+      <div class="spacer"></div>
+
+      <ion-button expand="block" class="primary-button" (click)="onRegister()" [disabled]="isLoading">
+        <ion-spinner *ngIf="isLoading" name="crescent"></ion-spinner>
+        <span *ngIf="!isLoading">Finish</span>
+      </ion-button>
+    </div>
+  </div>
+</ion-content>

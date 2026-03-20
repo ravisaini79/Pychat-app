@@ -1,0 +1,76 @@
+<ion-header class="ion-no-border">
+  <ion-toolbar color="primary">
+    <ion-title>TalkSpot</ion-title>
+    <ion-buttons slot="end">
+      <ion-button>
+        <ion-icon slot="icon-only" name="search-outline"></ion-icon>
+      </ion-button>
+      <ion-button id="status-menu-trigger">
+        <ion-icon slot="icon-only" name="ellipsis-vertical"></ion-icon>
+      </ion-button>
+      
+      <ion-popover trigger="status-menu-trigger" triggerAction="click" [dismissOnSelect]="true">
+        <ng-template>
+          <ion-list lines="none">
+            <ion-item button (click)="statusPrivacy()">Status privacy</ion-item>
+            <ion-item button (click)="openSettings()">Settings</ion-item>
+          </ion-list>
+        </ng-template>
+      </ion-popover>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true">
+  <!-- Hidden file input for uploading media statuses -->
+  <input type="file" #fileInput accept="image/*,video/*" (change)="onFileSelected($event)" style="display: none;">
+
+  <ion-list lines="none" class="status-list">
+    <!-- My Status -->
+    <ion-item button (click)="myGroupedStatus ? openStatus(myGroupedStatus) : addStatus()">
+      <div class="avatar-wrap slot-start" [class.story-active]="myGroupedStatus" slot="start">
+        <app-avatar [src]="myAvatar || '/assets/avatars/default.png'" name="My Status" [size]="52"></app-avatar>
+        <svg *ngIf="myGroupedStatus" class="story-ring" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="48" [attr.stroke-dasharray]="getStrokeDasharray(myGroupedStatus.statuses.length)"></circle>
+        </svg>
+        <div class="add-btn" *ngIf="!myGroupedStatus">
+          <ion-icon name="add"></ion-icon>
+        </div>
+      </div>
+      <ion-label>
+        <h2>My status</h2>
+        <p *ngIf="myGroupedStatus">{{ myGroupedStatus.statuses[0].created_at | date:'shortTime' }}</p>
+        <p *ngIf="!myGroupedStatus">Tap to add status update</p>
+      </ion-label>
+      <ion-icon *ngIf="myGroupedStatus" name="ellipsis-vertical" slot="end" (click)="myStatusOptions($event); $event.stopPropagation()" color="medium"></ion-icon>
+    </ion-item>
+
+    <ion-list-header>
+      <ion-label color="medium">Recent updates</ion-label>
+    </ion-list-header>
+
+    <ion-item button *ngFor="let group of groupedStatuses" (click)="openStatus(group)">
+      <div class="avatar-wrap story-active slot-start" slot="start">
+        <app-avatar [src]="group.avatar" [name]="group.user_name" [size]="52"></app-avatar>
+        <!-- Story ring indicator using SVG -->
+        <svg class="story-ring" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="48" [attr.stroke-dasharray]="getStrokeDasharray(group.statuses.length)"></circle>
+        </svg>
+      </div>
+      <ion-label>
+        <h2>{{ group.user_name }}</h2>
+        <!-- Show time of most recent status -->
+        <p>{{ group.statuses[0].created_at | date:'shortTime' }}</p>
+      </ion-label>
+    </ion-item>
+  </ion-list>
+
+  <ion-fab vertical="bottom" horizontal="end" slot="fixed">
+    <ion-fab-button size="small" color="light" class="fab-text" (click)="promptTextStatus()">
+      <ion-icon name="pencil" color="dark"></ion-icon>
+    </ion-fab-button>
+    <ion-fab-button color="secondary" class="fab-camera" (click)="addStatus()">
+      <ion-icon name="camera"></ion-icon>
+    </ion-fab-button>
+  </ion-fab>
+</ion-content>

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi.staticfiles import StaticFiles
 from .db import connect_db, close_db
-from .routers import auth, chat, ws
+from .routers import auth, chat, ws, calls
 import os
 
 UPLOAD_DIR = "uploads"
@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="AI Chat API",
+    title="TalkSpot API",
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -32,7 +32,10 @@ app.add_middleware(
         "https://pychat-app-steel.vercel.app",
         "capacitor://localhost",   # 🔥 Android WebView
         "http://localhost"   ,      # 🔥 Fallback
-        "https://localhost" 
+        "https://localhost" ,
+        "http://localhost:8100",
+        "http://localhost:4200"
+        
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -42,6 +45,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(ws.router)
+app.include_router(calls.router)
 
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 

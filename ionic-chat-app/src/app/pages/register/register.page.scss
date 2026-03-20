@@ -1,0 +1,110 @@
+.register-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: white;
+
+  .header-section {
+    padding: 20px;
+    text-align: center;
+    border-bottom: 1px solid #f0f2f5;
+
+    ion-buttons {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+    }
+
+    h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--ion-color-primary);
+      margin: 10px 0 4px;
+    }
+
+    p {
+      font-size: 14px;
+      color: #667781;
+      margin: 0;
+    }
+  }
+
+  .profile-upload-section {
+    padding: 40px 0;
+    display: flex;
+    justify-content: center;
+
+    .avatar-container {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      background: #f0f2f5;
+      position: relative;
+      cursor: pointer;
+      overflow: hidden;
+      
+      img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .camera-overlay {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 35%;
+        background: rgba(0, 0, 0, 0.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        
+        ion-icon {
+          color: white;
+          font-size: 20px;
+        }
+      }
+    }
+  }
+
+  .form-container {
+    padding: 0 24px;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+
+    .custom-item {
+      margin-bottom: 16px;
+      --background: #f8f9fa;
+      --border-radius: 12px;
+      --highlight-height: 0;
+      border: 1px solid #e1e7eb;
+      height: 54px;
+
+      ion-icon {
+        color: #667781;
+        font-size: 18px;
+        margin-right: 8px;
+      }
+
+      ion-input {
+        font-weight: 500;
+      }
+    }
+
+    .spacer {
+      flex: 1;
+    }
+
+    .primary-button {
+      --border-radius: 12px;
+      --box-shadow: 0 4px 12px rgba(7, 94, 84, 0.2);
+      height: 56px;
+      font-weight: 600;
+      text-transform: none;
+      font-size: 16px;
+      margin-bottom: 30px;
+    }
+  }
+}

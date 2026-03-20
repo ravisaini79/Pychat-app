@@ -1,0 +1,84 @@
+.status-list {
+  padding-top: 8px;
+
+  ion-list-header {
+    --min-height: 32px;
+    ion-label {
+      font-size: 14px;
+      font-weight: 500;
+    }
+  }
+
+  ion-item {
+    --min-height: 72px;
+    --padding-start: 16px;
+
+    h2 {
+      font-size: 16px;
+      font-weight: 500;
+      color: #111b21;
+    }
+
+    p {
+      font-size: 14px;
+      color: #667781;
+    }
+  }
+}
+
+.avatar-wrap {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  ion-avatar {
+    width: 52px;
+    height: 52px;
+  }
+
+  &.story-active {
+    border: 2px solid var(--ion-color-secondary);
+    border-radius: 50%;
+    padding: 2px;
+  }
+
+  .add-btn {
+    position: absolute;
+    bottom: 4px;
+    right: 4px;
+    background: var(--ion-color-secondary);
+    color: white;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid white;
+    font-size: 14px;
+    font-weight: bold;
+  }
+}
+
+ion-fab {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-right: 16px;
+  margin-bottom: 16px;
+
+  .fab-text {
+    width: 40px;
+    height: 40px;
+    --box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+
+  .fab-camera {
+    width: 56px;
+    height: 56px;
+    --box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  }
+}

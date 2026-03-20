@@ -1,0 +1,83 @@
+<ion-header class="ion-no-border">
+  <ion-toolbar color="primary">
+    <ion-title>TalkSpot</ion-title>
+    <ion-buttons slot="end">
+      <ion-button>
+        <ion-icon slot="icon-only" name="search-outline"></ion-icon>
+      </ion-button>
+      <ion-button id="main-menu-trigger">
+        <ion-icon slot="icon-only" name="ellipsis-vertical"></ion-icon>
+      </ion-button>
+      
+      <ion-popover trigger="main-menu-trigger" triggerAction="click" [dismissOnSelect]="true">
+        <ng-template>
+          <ion-list lines="none">
+            <ion-item button (click)="newGroup()">New group</ion-item>
+            <ion-item button (click)="newBroadcast()">New broadcast</ion-item>
+            <ion-item button (click)="linkedDevices()">Linked devices</ion-item>
+            <ion-item button (click)="starredMessages()">Starred messages</ion-item>
+            <ion-item button (click)="openSettings()">Settings</ion-item>
+          </ion-list>
+        </ng-template>
+      </ion-popover>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true">
+  <!-- Incoming Connection Requests -->
+  <div class="requests-section" *ngIf="pendingRequests.length > 0">
+    <div class="section-header">
+      <ion-label>Connection Requests</ion-label>
+      <ion-badge color="primary">{{ pendingRequests.length }}</ion-badge>
+    </div>
+    
+    <ion-list lines="none">
+      <ion-item-sliding *ngFor="let req of pendingRequests">
+        <ion-item class="request-item">
+          <app-avatar slot="start" [src]="req.from_user.avatar" [name]="req.from_user.name" [size]="50"></app-avatar>
+          <ion-label>
+            <h2>{{ req.from_user.name }}</h2>
+            <p>wants to connect</p>
+          </ion-label>
+          <div slot="end" class="request-actions">
+            <ion-button fill="clear" color="primary" (click)="acceptRequest(req)">
+              Accept
+            </ion-button>
+            <ion-button fill="clear" color="medium" (click)="rejectRequest(req)">
+              Decline
+            </ion-button>
+          </div>
+        </ion-item>
+      </ion-item-sliding>
+    </ion-list>
+  </div>
+
+  <ion-list lines="none" class="chat-list">
+    <ion-item-sliding *ngFor="let chat of chats">
+      <ion-item button (click)="openChat(chat)" class="chat-item">
+        <app-avatar slot="start" [src]="chat.avatar" [name]="chat.name" [size]="52"></app-avatar>
+        <ion-label>
+          <div class="chat-header">
+            <h3>{{ chat.name }}</h3>
+            <span class="chat-time">{{ chat.lastMessageTime }}</span>
+          </div>
+          <div class="chat-footer">
+            <p class="last-message">{{ chat.last_message || 'Start chatting...' }}</p>
+            <ion-badge color="secondary" *ngIf="chat.unread_count > 0">{{ chat.unread_count }}</ion-badge>
+          </div>
+        </ion-label>
+      </ion-item>
+      
+      <ion-item-options side="end">
+        <ion-item-option color="primary">Archive</ion-item-option>
+      </ion-item-options>
+    </ion-item-sliding>
+  </ion-list>
+
+  <ion-fab vertical="bottom" horizontal="end" slot="fixed">
+    <ion-fab-button color="secondary" (click)="openSearchModal()">
+      <ion-icon name="chatbox-ellipses"></ion-icon>
+    </ion-fab-button>
+  </ion-fab>
+</ion-content>

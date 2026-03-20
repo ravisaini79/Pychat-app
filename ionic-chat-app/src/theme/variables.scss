@@ -1,0 +1,41 @@
+// Purple WhatsApp Theme for TalkSpot
+:root {
+  --ion-color-primary: #6a11cb;
+  --ion-color-primary-rgb: 106, 17, 203;
+  --ion-color-primary-contrast: #ffffff;
+  --ion-color-primary-contrast-rgb: 255, 255, 255;
+  --ion-color-primary-shade: #5d0fb3;
+  --ion-color-primary-tint: #7929d0;
+
+  --ion-color-secondary: #9c27b0;
+  --ion-color-secondary-rgb: 156, 39, 176;
+  --ion-color-secondary-contrast: #ffffff;
+  --ion-color-secondary-contrast-rgb: 255, 255, 255;
+  --ion-color-secondary-shade: #89229b;
+  --ion-color-secondary-tint: #a63db8;
+
+  --ion-color-tertiary: #4a148c;
+  --ion-color-tertiary-rgb: 74, 20, 140;
+  --ion-color-tertiary-contrast: #ffffff;
+  --ion-color-tertiary-contrast-rgb: 255, 255, 255;
+  --ion-color-tertiary-shade: #41127b;
+  --ion-color-tertiary-tint: #5c2c98;
+
+  --ion-color-success: #2ecc71;
+  --ion-color-warning: #f1c40f;
+  --ion-color-danger: #e74c3c;
+  --ion-color-dark: #2c3e50;
+  --ion-color-medium: #8696a0;
+  --ion-color-light: #f3e5f5; /* Very light purple background */
+  
+  --purple-gradient: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+  --whatsapp-chat-bg: #f3e5f5;
+  --whatsapp-incoming-bubble: #ffffff;
+  --whatsapp-outgoing-bubble: #e1bee7;
+}
+
+.status-active {
+  border: 2px solid var(--ion-color-primary);
+  padding: 2px;
+  border-radius: 50%;
+}

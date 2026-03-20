@@ -1,18 +1,36 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import shutil
 import os
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
 from bson import ObjectId
+from typing import List
 
 from ..db import get_db
 from ..auth import get_current_user
-from ..schemas import MessageCreate, ConnectionRequestCreate, GroupCreate
-from ..models import message_from_doc, conversation_id, user_from_doc, serialize_doc
+from ..schemas import MessageCreate, ConnectionRequestCreate, GroupCreate, StatusCreate, MessageOut, ConversationPartner, StatusOut, UserOut
+from ..models import message_from_doc, conversation_id, user_from_doc, serialize_doc, status_from_doc
 from ..websocket_manager import ws_manager
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 UPLOAD_DIR = "uploads"
+
+@router.get("/user/{user_id}", response_model=UserOut)
+async def get_user_profile(user_id: str, current_user: dict = Depends(get_current_user)):
+    """Fetch profile details of a user by ID."""
+    db = get_db()
+    try:
+        uid = ObjectId(user_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid user id")
+        
+    doc = await db.users.find_one({"_id": uid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    user = user_from_doc(doc)
+    user.pop("password_hash", None)
+    return user
 
 @router.post("/upload")
 async def upload_file(
@@ -84,6 +102,96 @@ async def list_groups(current_user: dict = Depends(get_current_user)):
     async for doc in cursor:
         groups.append(serialize_doc(doc))
     return groups
+
+
+@router.get("/search-by-phone")
+async def search_by_phone(
+    phone: str = Query(..., min_length=10, max_length=15),
+    current_user: dict = Depends(get_current_user),
+):
+    """Search for a specific user by exact phone number."""
+    db = get_db()
+    my_id = current_user["id"]
+    
+    # Clean phone number (strip whitespace, ensure no + if needed, etc)
+    # The requirement says exact phone number.
+    phone = phone.strip()
+    
+    user_doc = await db.users.find_one({"mobile": phone})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found with this phone number")
+    
+    u = user_from_doc(user_doc)
+    if u["id"] == my_id:
+        u["connection_status"] = "self"
+    else:
+        # Check connection status
+        status = "none"
+        req = await db.connection_requests.find_one(
+            {
+                "$or": [
+                    {"from_user_id": my_id, "to_user_id": u["id"]},
+                    {"from_user_id": u["id"], "to_user_id": my_id},
+                ],
+                "status": {"$in": ["pending", "accepted"]},
+            },
+            sort=[("created_at", -1)],
+        )
+        if req:
+            if req["status"] == "accepted":
+                status = "connected"
+            elif req["from_user_id"] == my_id:
+                status = "pending_sent"
+            else:
+                status = "pending_received"
+        u["connection_status"] = status
+        if req and status != "connected":
+            u["request_id"] = str(req["_id"])
+            
+    return u
+
+
+@router.get("/connection-status/{user_id}")
+async def get_connection_status(
+    user_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Get the connection status with a specific user by their ID."""
+    db = get_db()
+    my_id = current_user["id"]
+    
+    if user_id == my_id:
+        return {"connection_status": "self"}
+        
+    status = "none"
+    request_id = None
+    
+    req = await db.connection_requests.find_one(
+        {
+            "$or": [
+                {"from_user_id": my_id, "to_user_id": user_id},
+                {"from_user_id": user_id, "to_user_id": my_id},
+            ],
+            "status": {"$in": ["pending", "accepted"]},
+        },
+        sort=[("created_at", -1)],
+    )
+    
+    if req:
+        if req["status"] == "accepted":
+            status = "connected"
+        elif req["from_user_id"] == my_id:
+            status = "pending_sent"
+        else:
+            status = "pending_received"
+        
+        if status != "connected":
+            request_id = str(req["_id"])
+            
+    return {
+        "connection_status": status,
+        "request_id": request_id
+    }
 
 
 @router.get("/users")
@@ -443,7 +551,9 @@ async def get_messages(
     async for doc in cursor:
         if "type" not in doc:
             doc["type"] = "text"
-        messages.append(message_from_doc(doc))
+        m = message_from_doc(doc)
+        # Ensure ID is string for next page
+        messages.append(m)
 
     # Mark as read
     now = datetime.utcnow()
@@ -452,6 +562,23 @@ async def get_messages(
         {"$set": {"last_read_at": now}},
         upsert=True,
     )
+    
+    # Notify sender that messages were seen if they are not the sender
+    if messages and not is_group:
+        last_msg = messages[0] # messages are sorted DESC
+        if last_msg["sender_id"] != my_id:
+             # In a real app, we might update ALL messages in this chunk to 'seen'
+             await db.messages.update_many(
+                 {"conversation_id": cid, "receiver_id": my_id, "status": {"$ne": "seen"}},
+                 {"$set": {"status": "seen"}}
+             )
+             # Notify sender
+             await ws_manager.send_to_user(other_id, {
+                 "event": "messages_seen",
+                 "conversation_id": cid,
+                 "by_user_id": my_id
+             })
+
     return list(reversed(messages))
 
 
@@ -465,7 +592,7 @@ async def send_message(
     my_id = current_user["id"]
     
     msg_type = (body.type or "text").lower()
-    if msg_type not in ("text", "image", "contact", "location", "video"):
+    if msg_type not in ("text", "image", "contact", "location", "video", "voice"):
         msg_type = "text"
     content = body.content.strip() if body.content else ""
     if msg_type == "text" and not content:
@@ -477,6 +604,16 @@ async def send_message(
         "content": content,
         "created_at": datetime.utcnow(),
     }
+    
+    # Handle Reply
+    if body.reply_to_id:
+        try:
+            reply_msg = await db.messages.find_one({"_id": ObjectId(body.reply_to_id)})
+            if reply_msg:
+                doc["reply_to_id"] = body.reply_to_id
+                doc["reply_to_content"] = reply_msg.get("content", "")
+        except Exception:
+            pass
 
     if body.group_id:
         # Send to group
@@ -581,3 +718,150 @@ async def react_to_message(
     other_id = doc["receiver_id"] if doc["sender_id"] == my_id else doc["sender_id"]
     await ws_manager.broadcast_message_reacted(other_id, message_id, reactions)
     return {"reactions": reactions}
+# ---------- Stories / Status ----------
+
+@router.post("/status")
+async def post_status(
+    body: StatusCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    """Post a new status/story."""
+    db = get_db()
+    my_id = current_user["id"]
+    
+    expires_at = datetime.utcnow() + timedelta(hours=24)
+    doc = {
+        "user_id": my_id,
+        "type": body.type,
+        "content": body.content,
+        "background_color": body.background_color,
+        "created_at": datetime.utcnow(),
+        "expires_at": expires_at,
+        "viewers": []
+    }
+    r = await db.status.insert_one(doc)
+    doc["id"] = str(r.inserted_id)
+    
+    return serialize_doc(doc)
+
+@router.get("/status")
+async def get_statuses(current_user: dict = Depends(get_current_user)):
+    """Get active statuses from contacts and self."""
+    db = get_db()
+    my_id = current_user["id"]
+    
+    # Get contacts
+    accepted = await db.connection_requests.find({
+        "$or": [{"from_user_id": my_id}, {"to_user_id": my_id}],
+        "status": "accepted"
+    }).to_list(length=1000)
+    
+    contact_ids = [a["to_user_id"] if a["from_user_id"] == my_id else a["from_user_id"] for a in accepted]
+    contact_ids.append(my_id)
+
+    # Fetch user details for all contacts and self
+    users_docs = await db.users.find({"_id": {"$in": [ObjectId(uid) for uid in contact_ids]}}).to_list(length=None)
+    user_map = {str(user["_id"]): user for user in users_docs}
+
+    now = datetime.utcnow()
+    cursor = db.status.find({
+        "user_id": {"$in": contact_ids},
+        "expires_at": {"$gt": now}
+    }).sort("created_at", -1)
+    
+    all_statuses_docs = await cursor.to_list(length=None)
+    
+    statuses = []
+    for doc in all_statuses_docs:
+        cat = doc.get("created_at")
+        eat = doc.get("expires_at")
+        
+        # Guard against corrupted legacy documents without proper dates causing Pydantic 500 errors
+        if not hasattr(cat, "isoformat") or not hasattr(eat, "isoformat"):
+            continue
+
+        doc["id"] = str(doc.pop("_id"))
+        doc["created_at"] = cat.isoformat()
+        doc["expires_at"] = eat.isoformat()
+        
+        viewers = doc.get("viewers", [])
+        doc["views_count"] = len(viewers)
+        doc["viewed_by_me"] = my_id in viewers
+        
+        # Populate user info
+        user = user_map.get(doc["user_id"])
+        if user:
+            doc["user_name"] = user["name"]
+            doc["avatar"] = user.get("avatar")
+            statuses.append(doc)
+            
+    return statuses
+
+@router.post("/status/{status_id}/view")
+async def view_status(
+    status_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Mark a status as viewed by current user."""
+    db = get_db()
+    my_id = current_user["id"]
+    try:
+        sid = ObjectId(status_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid status id")
+        
+    await db.status.update_one(
+        {"_id": sid},
+        {"$addToSet": {"viewers": my_id}}
+    )
+    return {"status": "viewed"}
+
+@router.delete("/status/{status_id}")
+async def delete_status(
+    status_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Delete a status update. Only owner can delete."""
+    db = get_db()
+    my_id = current_user["id"]
+    try:
+        sid = ObjectId(status_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid status id")
+        
+    # Verify owner
+    doc = await db.status.find_one({"_id": sid, "user_id": my_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Status not found or unauthorized")
+        
+    await db.status.delete_one({"_id": sid})
+    return {"status": "deleted"}
+
+@router.get("/status/{status_id}/viewers")
+async def get_status_viewers(
+    status_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get list of users who viewed a status. Only owner can see."""
+    db = get_db()
+    my_id = current_user["id"]
+    try:
+        sid = ObjectId(status_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid status id")
+    
+    status = await db.status.find_one({"_id": sid, "user_id": my_id})
+    if not status:
+        raise HTTPException(status_code=404, detail="Status not found or unauthorized")
+        
+    viewer_ids = status.get("viewers", [])
+    if not viewer_ids:
+        return []
+        
+    # Fetch user details (name, avatar)
+    users = await db.users.find(
+        {"_id": {"$in": [ObjectId(uid) for uid in viewer_ids]}},
+        {"_id": 1, "name": 1, "avatar": 1}
+    ).to_list(length=None)
+    
+    return [serialize_doc(u) for u in users]

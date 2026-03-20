@@ -3,6 +3,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..auth import decode_token
 from ..websocket_manager import ws_manager
+from bson import ObjectId
 
 router = APIRouter(tags=["websocket"])
 
@@ -27,7 +28,31 @@ async def websocket_endpoint(websocket: WebSocket):
                 event = data.get("event")
                 if event == "webrtc_signal":
                     await ws_manager.handle_webrtc_signal(user_id, data)
-                # Handle other WS events here if needed
+                elif event == "typing":
+                    receiver_id = data.get("receiver_id")
+                    group_id = data.get("group_id")
+                    is_typing = data.get("is_typing", False)
+                    if group_id:
+                        from ..db import get_db
+                        db = get_db()
+                        group = await db.groups.find_one({"_id": ObjectId(group_id)})
+                        if group:
+                            await ws_manager.broadcast_group_typing(user_id, group_id, is_typing, group["members"])
+                    elif receiver_id:
+                        await ws_manager.broadcast_typing(user_id, receiver_id, is_typing)
+                elif event == "message_seen":
+                    message_id = data.get("message_id")
+                    # Update message status in DB and notify sender
+                    from ..db import get_db
+                    db = get_db()
+                    msg = await db.messages.find_one({"_id": ObjectId(message_id)})
+                    if msg:
+                        await db.messages.update_one({"_id": ObjectId(message_id)}, {"$set": {"status": "seen"}})
+                        await ws_manager.send_to_user(msg["sender_id"], {
+                            "event": "message_status_update",
+                            "message_id": message_id,
+                            "status": "seen"
+                        })
             except Exception:
                 # Ignore malformed JSON or errors during processing
                 pass

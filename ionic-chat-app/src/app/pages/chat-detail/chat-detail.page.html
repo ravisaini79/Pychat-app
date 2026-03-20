@@ -1,0 +1,190 @@
+<ion-header class="ion-no-border">
+  <ion-toolbar color="primary">
+    <ion-buttons slot="start">
+      <ion-back-button defaultHref="/tabs/tab1"></ion-back-button>
+      <app-avatar [src]="avatar || '/assets/avatars/default.png'" [name]="name" [size]="40" class="toolbar-avatar" (click)="viewProfile()"></app-avatar>
+    </ion-buttons>
+    <ion-title class="chat-title" (click)="viewProfile()">
+      <h2>{{ name }}</h2>
+      <p *ngIf="connectionStatus === 'connected'">{{ isOnline ? 'online' : (lastSeenText || 'offline') }}</p>
+    </ion-title>
+    <ion-buttons slot="end" *ngIf="connectionStatus === 'connected'">
+      <ion-button (click)="startVideoCall()">
+        <ion-icon slot="icon-only" name="videocam"></ion-icon>
+      </ion-button>
+      <ion-button (click)="startAudioCall()">
+        <ion-icon slot="icon-only" name="call"></ion-icon>
+      </ion-button>
+      <ion-button>
+        <ion-icon slot="icon-only" name="ellipsis-vertical"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content #content [fullscreen]="true" class="chat-background" (click)="hideReactionPicker()">
+  <div class="message-list">
+    <ion-item-sliding #slidingItem *ngFor="let msg of messages; let i = index" [disabled]="connectionStatus !== 'connected' && chatType === 'private'">
+      <ion-item-options side="start">
+        <ion-item-option (click)="setReply(msg); slidingItem.close()" class="reply-swipe-option">
+          <div class="swipe-icon-wrapper">
+            <ion-icon name="arrow-undo"></ion-icon>
+          </div>
+        </ion-item-option>
+      </ion-item-options>
+
+      <ion-item lines="none" class="msg-sliding-item">
+        <div 
+          [class]="'message-wrap ' + (msg.sender_id === currentUserId ? 'sent' : 'received')"
+          [attr.data-id]="msg.id"
+        >
+          <div class="horizontal-reaction-picker" *ngIf="selectedMessageForReaction?.id === msg.id">
+            <span (click)="sendReaction(msg.id, '❤️')">❤️</span>
+            <span (click)="sendReaction(msg.id, '😂')">😂</span>
+            <span (click)="sendReaction(msg.id, '😮')">😮</span>
+            <span (click)="sendReaction(msg.id, '😢')">😢</span>
+            <span (click)="sendReaction(msg.id, '🙏')">🙏</span>
+            <span (click)="sendReaction(msg.id, '👍')">👍</span>
+          </div>
+
+          <div class="message-bubble" [attr.data-id]="msg.id">
+            <div class="sender-name" *ngIf="chatType === 'group' && msg.sender_id !== currentUserId">
+              {{ msg.sender_name || 'Member' }}
+            </div>
+            <div class="reply-preview" *ngIf="msg.reply_to_content">
+              <span class="reply-sender">Replied Message</span>
+              <p>{{ msg.reply_to_content }}</p>
+            </div>
+            
+            <!-- Media Attachments Renderer -->
+            <ng-container [ngSwitch]="msg.type">
+              <!-- Image -->
+              <img *ngSwitchCase="'image'" [src]="msg.content" class="msg-image" />
+              
+              <!-- Video -->
+              <video *ngSwitchCase="'video'" [src]="msg.content" controls class="msg-video"></video>
+              
+              <!-- Voice -->
+              <audio *ngSwitchCase="'voice'" [src]="msg.content" controls class="msg-audio"></audio>
+              
+              <!-- Location -->
+              <div *ngSwitchCase="'location'" class="msg-location card-attachment">
+                <ion-icon name="location" color="danger"></ion-icon>
+                <div class="details">
+                  <h4>Location</h4>
+                  <p>{{ msg.content }}</p>
+                </div>
+              </div>
+              
+              <!-- Contact -->
+              <div *ngSwitchCase="'contact'" class="msg-contact card-attachment">
+                <ion-icon name="person-circle" color="primary"></ion-icon>
+                <div class="details">
+                  <h4>Contact</h4>
+                  <p>{{ msg.content }}</p>
+                </div>
+              </div>
+              
+              <!-- Default Text -->
+              <p *ngSwitchDefault>{{ msg.content }}</p>
+            </ng-container>
+    
+            <div class="message-info">
+              <span class="time">{{ msg.created_at | date:'shortTime' }}</span>
+              <ion-icon *ngIf="msg.sender_id === currentUserId" 
+                [name]="msg.status === 'seen' || msg.status === 'delivered' ? 'checkmark-done' : 'checkmark'"
+                [color]="msg.status === 'seen' ? 'secondary' : 'medium'"
+              ></ion-icon>
+              
+              <ion-button fill="clear" size="small" class="download-btn" 
+                (click)="downloadMedia(msg.content, msg.type + '_' + msg.id); $event.stopPropagation()" 
+                *ngIf="['image', 'video', 'voice'].includes(msg.type)">
+                <ion-icon name="download-outline" slot="icon-only"></ion-icon>
+              </ion-button>
+            </div>
+    
+            <!-- Reactions -->
+            <div class="reactions-badge" *ngIf="msg.reactions && (msg.reactions | keyvalue).length > 0">
+              <span *ngFor="let r of msg.reactions | keyvalue">{{ r.value }}</span>
+            </div>
+          </div>
+        </div>
+      </ion-item>
+    </ion-item-sliding>
+  </div>
+</ion-content>
+
+<ion-footer class="ion-no-border">
+  <!-- Connection Banner for Private Chats -->
+  <div class="connection-banner" *ngIf="chatType === 'private' && connectionStatus !== 'connected'">
+    <div class="banner-content">
+      <ion-icon name="lock-closed-outline" color="medium"></ion-icon>
+      <p *ngIf="connectionStatus === 'none'">Send a connection request to chat with {{ name }}.</p>
+      <p *ngIf="connectionStatus === 'pending_sent'">Connection request sent. Waiting for {{ name }} to accept.</p>
+      <p *ngIf="connectionStatus === 'pending_received'">{{ name }} wants to connect with you.</p>
+      
+      <div class="banner-actions">
+        <ion-button *ngIf="connectionStatus === 'none'" (click)="sendRequest()" expand="block" mode="ios">
+          Send Request
+        </ion-button>
+        <ng-container *ngIf="connectionStatus === 'pending_received'">
+          <ion-button (click)="acceptRequest()" color="primary" mode="ios">Accept</ion-button>
+          <ion-button (click)="rejectRequest()" fill="clear" color="medium" mode="ios">Decline</ion-button>
+        </ng-container>
+      </div>
+    </div>
+  </div>
+
+  <div class="reply-footer" *ngIf="replyingTo && connectionStatus === 'connected'">
+    <div class="reply-content">
+      <span>Replying to</span>
+      <p>{{ replyingTo.content }}</p>
+    </div>
+    <ion-button fill="clear" (click)="cancelReply()" color="medium">
+      <ion-icon name="close-circle"></ion-icon>
+    </ion-button>
+  </div>
+
+  <div class="emoji-picker-container" *ngIf="showEmojiPicker">
+    <div class="emoji-grid">
+      <span class="emoji-btn" *ngFor="let emoji of commonEmojis" (click)="insertEmoji(emoji)">{{emoji}}</span>
+    </div>
+  </div>
+
+  <ion-toolbar class="input-toolbar" *ngIf="chatType === 'group' || connectionStatus === 'connected'">
+    <div class="input-container">
+      <div class="message-input-box" *ngIf="!isRecording">
+        <ion-button fill="clear" color="medium" (click)="toggleEmojiPicker()">
+          <ion-icon slot="icon-only" name="happy-outline"></ion-icon>
+        </ion-button>
+        <ion-textarea
+          placeholder="Message"
+          [(ngModel)]="newMessage"
+          [autoGrow]="true"
+          rows="1"
+          (ionInput)="onInput()"
+        ></ion-textarea>
+        <!-- hidden file input -->
+        <input type="file" #fileInput (change)="onFileSelected($event)" accept="image/*,video/*" style="display: none;">
+        
+        <ion-button fill="clear" color="medium" (click)="openAttachmentMenu()">
+          <ion-icon slot="icon-only" name="attach-outline"></ion-icon>
+        </ion-button>
+        <ion-button fill="clear" color="medium" *ngIf="!newMessage" (click)="openAttachmentMenu()">
+          <ion-icon slot="icon-only" name="camera-outline"></ion-icon>
+        </ion-button>
+      </div>
+
+      <!-- Recording Bar -->
+      <div class="recording-bar" *ngIf="isRecording">
+        <div class="recorder-dot"></div>
+        <span class="timer">{{ formatDuration(recordingDuration) }}</span>
+        <span class="tip">Recording...</span>
+      </div>
+      
+      <ion-fab-button size="small" [color]="isRecording ? 'danger' : (newMessage ? 'secondary' : 'primary')" (click)="newMessage ? sendMessage() : toggleVoiceRecording()">
+        <ion-icon [name]="newMessage ? 'send' : (isRecording ? 'send' : 'mic')"></ion-icon>
+      </ion-fab-button>
+    </div>
+  </ion-toolbar>
+</ion-footer>

@@ -1,0 +1,138 @@
+.login-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: white;
+
+  .top-section {
+    padding: 60px 20px 40px;
+    text-align: center;
+    
+    .logo-circle {
+      width: 80px;
+      height: 80px;
+      background: var(--ion-color-primary);
+      border-radius: 50%;
+      margin: 0 auto 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 16px rgba(7, 94, 84, 0.15);
+      
+      ion-icon {
+        font-size: 40px;
+        color: white;
+      }
+    }
+
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--ion-color-primary);
+      margin: 0 0 8px;
+    }
+
+    p {
+      font-size: 16px;
+      color: #667781;
+      margin: 0;
+    }
+  }
+
+  .form-container {
+    padding: 20px;
+    flex: 1;
+
+    .phone-input-group {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+
+      .country-code-selector {
+        width: 80px;
+        height: 56px;
+        border: 1px solid #e1e7eb;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        background: #f8f9fa;
+        
+        span {
+          font-weight: 600;
+          color: #111b21;
+        }
+        
+        ion-icon {
+          font-size: 12px;
+          color: #667781;
+        }
+      }
+
+      .phone-item {
+        flex: 1;
+        --background: #f8f9fa;
+        --border-radius: 12px;
+        --highlight-height: 0;
+        border: 1px solid #e1e7eb;
+        height: 56px;
+
+        ion-input {
+          --padding-start: 16px;
+          font-weight: 500;
+        }
+      }
+    }
+
+    .password-item {
+      margin-bottom: 24px;
+      --background: #f8f9fa;
+      --border-radius: 12px;
+      --highlight-height: 0;
+      border: 1px solid #e1e7eb;
+      height: 56px;
+
+      ion-input {
+        --padding-start: 16px;
+        font-weight: 500;
+      }
+
+      ion-icon {
+        color: #667781;
+      }
+    }
+
+    .terms-text {
+      font-size: 13px;
+      color: #667781;
+      text-align: center;
+      margin-bottom: 32px;
+      line-height: 1.5;
+    }
+
+    .primary-button {
+      --border-radius: 12px;
+      --box-shadow: 0 4px 12px rgba(7, 94, 84, 0.2);
+      height: 56px;
+      font-weight: 600;
+      text-transform: none;
+      font-size: 16px;
+      margin-bottom: 24px;
+    }
+
+    .footer-links {
+      text-align: center;
+      p {
+        font-size: 14px;
+        color: #667781;
+        
+        a {
+          color: var(--ion-color-primary);
+          font-weight: 600;
+          text-decoration: none;
+        }
+      }
+    }
+  }
+}

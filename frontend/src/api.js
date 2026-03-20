@@ -1,5 +1,5 @@
-export const BASE_URL = ''; // Keep relative for convenience or set to backend URL
-const API_BASE = 'https://pychat-app.onrender.com';
+export const BASE_URL = ''; // Relative — Vite proxy handles /uploads → http://127.0.0.1:8000
+const API_BASE = '/api';   // Vite proxy: /api → http://127.0.0.1:8000
 
 function getToken() {
   return localStorage.getItem('token');

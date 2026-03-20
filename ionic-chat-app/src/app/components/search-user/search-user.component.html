@@ -1,0 +1,50 @@
+<ion-header class="ion-no-border">
+  <ion-toolbar color="primary">
+    <ion-buttons slot="start">
+      <ion-button (click)="dismiss()">
+        <ion-icon name="arrow-back"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+    <ion-searchbar 
+      placeholder="Search by name or number" 
+      (ionInput)="onSearch($event)"
+      debounce="300"
+      animated="true"
+      mode="ios"
+    ></ion-searchbar>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content>
+  <div *ngIf="isLoading" class="loading-wrap">
+    <ion-spinner name="crescent" color="primary"></ion-spinner>
+  </div>
+
+  <div *ngIf="!isLoading && users.length === 0 && searchAttempted" class="no-results">
+    <ion-icon name="search-outline"></ion-icon>
+    <p>No users found</p>
+  </div>
+
+  <ion-list lines="none" class="user-list">
+    <ion-item *ngFor="let user of users">
+      <app-avatar slot="start" [src]="user.avatar" [name]="user.name" [size]="50"></app-avatar>
+      <ion-label>
+        <h2>{{ user.name }}</h2>
+        <p>{{ user.mobile }}</p>
+      </ion-label>
+      
+      <div slot="end" class="action-wrap">
+        <ion-button *ngIf="user.connection_status === 'none'" fill="clear" (click)="sendRequest(user)">
+          Send
+        </ion-button>
+        <ion-badge *ngIf="user.connection_status === 'pending_sent'" color="medium" mode="ios">
+          Pending
+        </ion-badge>
+        <ion-badge *ngIf="user.connection_status === 'pending_received'" color="warning" mode="ios">
+          Accept
+        </ion-badge>
+        <ion-icon *ngIf="user.connection_status === 'connected'" name="checkmark-circle" color="secondary" class="check-icon"></ion-icon>
+      </div>
+    </ion-item>
+  </ion-list>
+</ion-content>

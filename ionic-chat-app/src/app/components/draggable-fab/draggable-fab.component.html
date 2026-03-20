@@ -1,0 +1,11 @@
+<div 
+  class="draggable-fab" 
+  [style.transform]="'translate3d(' + x + 'px,' + y + 'px, 0)'"
+  (touchstart)="onDragStart($event)"
+  (touchmove)="onDragMove($event)"
+  (mousedown)="onDragStart($event)"
+>
+  <ion-fab-button color="secondary" (click)="onClick()">
+    <ion-icon name="person-add"></ion-icon>
+  </ion-fab-button>
+</div>

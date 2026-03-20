@@ -1,0 +1,63 @@
+<div class="call-container" [class.video-mode]="type === 'video'">
+  
+  <!-- Video Background -->
+  <div class="video-wrappers" *ngIf="type === 'video'">
+    <video #remoteVideo autoplay playsinline class="remote-video"></video>
+    <video #localVideo autoplay playsinline muted class="local-video" [class.hidden]="isCameraOff"></video>
+  </div>
+
+  <!-- Main Content Overlay -->
+  <div class="overlay-content">
+    
+    <!-- Header: User Info -->
+    <div class="call-header">
+      <app-avatar [src]="targetUser?.avatar || '/assets/avatars/default.png'" [name]="targetUser?.name || 'User'" [size]="100"></app-avatar>
+      <h2>{{ targetUser?.name || 'User' }}</h2>
+      
+      <p class="status" [ngSwitch]="callState">
+        <span *ngSwitchCase="'dialing'">Calling...</span>
+        <span *ngSwitchCase="'ringing'">Ringing...</span>
+        <span *ngSwitchCase="'connected'">{{ timer }}</span>
+        <span *ngSwitchCase="'idle'">{{ isIncoming ? 'Incoming ' + type + ' call' : 'Initiating...' }}</span>
+        <span *ngSwitchDefault>Connecting...</span>
+      </p>
+    </div>
+
+    <!-- Incoming Call Actions -->
+    <div class="incoming-actions" *ngIf="isIncoming && callState === 'ringing'">
+      <ion-fab-button color="danger" (click)="reject()" class="reject-btn">
+        <ion-icon name="close"></ion-icon>
+      </ion-fab-button>
+      <ion-fab-button color="success" (click)="accept()" class="accept-btn">
+        <ion-icon [name]="type === 'video' ? 'videocam' : 'call'"></ion-icon>
+      </ion-fab-button>
+    </div>
+
+    <!-- Active/Outgoing Call Actions -->
+    <div class="ongoing-actions" *ngIf="!isIncoming || callState === 'connected'">
+      
+      <div class="controls-row">
+        <ion-button fill="clear" color="light" (click)="toggleSpeaker()">
+          <ion-icon [name]="isSpeakerOn ? 'volume-high' : 'volume-mute'"></ion-icon>
+          <span>Speaker</span>
+        </ion-button>
+        
+        <ion-button fill="clear" color="light" (click)="toggleCamera()" *ngIf="type === 'video'">
+          <ion-icon [name]="isCameraOff ? 'videocam-outline' : 'videocam'"></ion-icon>
+          <span>Video</span>
+        </ion-button>
+
+        <ion-button fill="clear" color="light" (click)="toggleMute()">
+          <ion-icon [name]="isMuted ? 'mic-off' : 'mic'"></ion-icon>
+          <span>Mute</span>
+        </ion-button>
+      </div>
+
+      <ion-fab-button color="danger" (click)="hangup()" class="hangup-btn">
+        <ion-icon name="call-outline"></ion-icon>
+      </ion-fab-button>
+    </div>
+
+  </div>
+
+</div>

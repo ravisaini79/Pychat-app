@@ -1,0 +1,39 @@
+ion-tab-bar {
+  --border: none;
+  --background: #ffffff;
+  height: 60px;
+  box-shadow: 0 -1px 3px rgba(0, 0, 0, 0.05);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+ion-tab-button {
+  --color: #8596a0; /* Typical inactive grey */
+  --color-selected: var(--ion-color-primary); /* Purple active */
+  transition: all 0.2s ease-in-out;
+  background: transparent;
+
+  ion-label {
+    font-size: 11px;
+    font-weight: 500;
+    margin-top: 2px;
+  }
+
+  ion-icon {
+    font-size: 26px;
+    margin-bottom: 2px;
+    transition: transform 0.15s ease;
+  }
+
+  &.tab-selected {
+    ion-icon {
+      transform: scale(1.1);
+      /* In Ionic, --color-selected takes over automatically, but we ensure it here */
+      color: var(--ion-color-primary);
+    }
+    ion-label {
+      font-weight: 600;
+      color: var(--ion-color-primary);
+    }
+  }
+}
+

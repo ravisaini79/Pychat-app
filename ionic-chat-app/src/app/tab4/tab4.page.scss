@@ -1,0 +1,86 @@
+.profile-header {
+  padding: 16px 0;
+  
+  .camera-badge {
+    position: absolute;
+    bottom: 0;
+    right: -4px;
+    background: var(--ion-color-primary);
+    color: white;
+    border-radius: 50%;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid white;
+    font-size: 14px;
+    z-index: 2;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  }
+
+  .profile-info {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    flex: 1;
+    margin-left: 16px;
+    
+    .edit-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      padding: 4px 0;
+      
+      &:active {
+        opacity: 0.6;
+      }
+
+      .edit-icon {
+        font-size: 16px;
+        color: var(--ion-color-primary);
+        opacity: 0.9;
+        margin-left: auto;
+      }
+    }
+
+    h2 {
+      font-size: 20px;
+      font-weight: 500;
+      margin: 0;
+      color: #111b21;
+    }
+
+    p {
+      font-size: 14px;
+      color: #667781;
+      margin: 0;
+    }
+  }
+}
+
+.divider {
+  height: 1px;
+  background: #f0f2f5;
+  margin: 0 16px 8px 72px;
+}
+
+ion-item {
+  --padding-start: 16px;
+  
+  ion-icon {
+    font-size: 24px;
+    margin-right: 16px;
+  }
+
+  h2 {
+    font-size: 16px;
+    font-weight: 400;
+  }
+
+  p {
+    font-size: 14px;
+    color: #667781;
+  }
+}

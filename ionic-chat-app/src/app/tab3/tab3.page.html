@@ -1,0 +1,50 @@
+<ion-header class="ion-no-border">
+  <ion-toolbar color="primary">
+    <ion-title>TalkSpot</ion-title>
+    <ion-buttons slot="end">
+      <ion-button>
+        <ion-icon slot="icon-only" name="search-outline"></ion-icon>
+      </ion-button>
+      <ion-button id="calls-menu-trigger">
+        <ion-icon slot="icon-only" name="ellipsis-vertical"></ion-icon>
+      </ion-button>
+      
+      <ion-popover trigger="calls-menu-trigger" triggerAction="click" [dismissOnSelect]="true">
+        <ng-template>
+          <ion-list lines="none">
+            <ion-item button (click)="clearCallLog()">Clear call log</ion-item>
+            <ion-item button (click)="openSettings()">Settings</ion-item>
+          </ion-list>
+        </ng-template>
+      </ion-popover>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true">
+  <ion-list lines="none" class="call-list">
+    <ion-item button *ngFor="let call of calls" (click)="reCall(call)">
+      <app-avatar slot="start" [src]="call.other_user.avatar || '/assets/avatars/default.png'" [name]="call.other_user.name" [size]="52"></app-avatar>
+      <ion-label>
+        <h2 [class.missed]="call.status === 'missed'">{{ call.other_user.name }}</h2>
+        <div class="call-info">
+          <ion-icon 
+            [name]="call.is_outgoing ? 'arrow-forward-outline' : 'arrow-back-outline'" 
+            [color]="call.status === 'missed' ? 'danger' : 'success'"
+          ></ion-icon>
+          <p>{{ call.start_time | date:'short' }}</p>
+        </div>
+      </ion-label>
+      <ion-icon slot="end" [name]="call.type === 'video' ? 'videocam-outline' : 'call-outline'" color="primary"></ion-icon>
+    </ion-item>
+  </ion-list>
+
+  <ion-fab vertical="bottom" horizontal="end" slot="fixed">
+    <ion-fab-button color="secondary">
+      <ion-icon name="call-outline"></ion-icon>
+      <div class="fab-badge">
+        <ion-icon name="add"></ion-icon>
+      </div>
+    </ion-fab-button>
+  </ion-fab>
+</ion-content>

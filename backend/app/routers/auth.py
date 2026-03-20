@@ -1,7 +1,7 @@
 import base64
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, HTTPException, File, UploadFile, Form
+from fastapi import APIRouter, HTTPException, File, UploadFile, Form, Depends
 from bson import ObjectId
 
 from ..db import get_db
@@ -9,7 +9,7 @@ from ..schemas import (
     UserLogin, Token,
     ForgotPasswordRequest, VerifyOTPRequest, ResetPasswordRequest,
 )
-from ..auth import create_access_token, hash_password, verify_password, decode_token
+from ..auth import create_access_token, hash_password, verify_password, decode_token, get_current_user
 from ..models import user_from_doc
 from ..email_utils import generate_otp, send_otp_email
 
@@ -93,8 +93,46 @@ async def login(data: UserLogin):
     return Token(access_token=token, user=user)
 
 
-# ---------- Forgot Password Flow ----------
+@router.get("/me", response_model=dict)
+async def get_me(current_user: dict = Depends(get_current_user)):
+    """Get the current authenticated user's profile information."""
+    # current_user is already fetched from db in `get_current_user`
+    user = user_from_doc(current_user)
+    user.pop("password_hash", None)
+    return user
 
+from ..schemas import UserUpdate
+
+@router.put("/me", response_model=dict)
+async def update_me(
+    data: UserUpdate,
+    current_user: dict = Depends(get_current_user)
+):
+    """Update profile fields (name, about, avatar) for current user."""
+    db = get_db()
+    my_id = current_user["id"]
+    
+    update_fields = {}
+    if data.name is not None:
+        update_fields["name"] = data.name.strip()
+    if data.about is not None:
+        update_fields["about"] = data.about.strip()
+    if data.avatar is not None:
+        update_fields["avatar"] = data.avatar.strip()
+        
+    if not update_fields:
+        return user_from_doc(current_user)
+        
+    await db.users.update_one(
+        {"_id": ObjectId(my_id)},
+        {"$set": update_fields}
+    )
+    
+    # fetch updated
+    updated_doc = await db.users.find_one({"_id": ObjectId(my_id)})
+    user = user_from_doc(updated_doc)
+    user.pop("password_hash", None)
+    return user
 
 @router.post("/forgot-password")
 async def forgot_password(data: ForgotPasswordRequest):

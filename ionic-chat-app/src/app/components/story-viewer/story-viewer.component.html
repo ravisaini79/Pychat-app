@@ -1,0 +1,108 @@
+<div class="story-container">
+  
+  <!-- Progress Bars -->
+  <div class="progress-bars-container">
+    <div class="progress-bar-bg" *ngFor="let s of group.statuses; let i = index">
+      <!-- Fill completely if index passed, use value if current, 0 if future -->
+      <div class="progress-bar-fill"
+           [style.width.%]="i < currentIndex ? 100 : (i === currentIndex ? progressValues[i] : 0)">
+      </div>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <div class="story-header ion-padding-horizontal">
+    <div class="user-info">
+      <app-avatar [src]="group.avatar" [name]="group.user_name" [size]="40"></app-avatar>
+      <div class="details">
+        <h2>{{ group.user_name }}</h2>
+        <p>{{ currentStory.created_at | date:'shortTime' }}</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <ion-button *ngIf="group.user_id === myId" fill="clear" color="light" (click)="deleteStatus()">
+        <ion-icon name="trash-outline" slot="icon-only"></ion-icon>
+      </ion-button>
+      <ion-button fill="clear" color="light" (click)="dismiss()">
+        <ion-icon name="close" slot="icon-only"></ion-icon>
+      </ion-button>
+    </div>
+  </div>
+
+  <!-- Content Area -->
+  <div class="story-content" 
+       (mousedown)="pauseStory()" (mouseup)="resumeStory()" 
+       (touchstart)="pauseStory()" (touchend)="resumeStory()">
+    
+    <!-- Tap Zones for Navigation -->
+    <div class="tap-zone left" (click)="prevStory()"></div>
+    <div class="tap-zone right" (click)="nextStory()"></div>
+
+    <!-- Media Rendering -->
+    <ng-container [ngSwitch]="currentStory.type">
+      
+      <!-- IMAGE -->
+      <img *ngSwitchCase="'image'" [src]="currentStory.content" class="media-content" />
+
+      <!-- VIDEO -->
+      <video *ngSwitchCase="'video'" 
+             #videoPlayer
+             [src]="currentStory.content" 
+             class="media-content"
+             autoplay 
+             playsinline
+             (ended)="onVideoEnded()">
+      </video>
+
+      <!-- TEXT -->
+      <div *ngSwitchDefault class="text-content" [style.background-color]="currentStory.background_color || '#128C7E'">
+        <h1>{{ currentStory.content }}</h1>
+      </div>
+
+    </ng-container>
+
+    <!-- Viewers count (My Status) -->
+    <div class="viewers-count clickable" *ngIf="group.user_id === myId" (click)="openViewers(); $event.stopPropagation()">
+      <ion-icon name="eye"></ion-icon>
+      <span>{{ currentStory.views_count || 0 }}</span>
+    </div>
+
+    <!-- Reply Input (Others Status) -->
+    <div class="reply-container" *ngIf="group.user_id !== myId" (click)="$event.stopPropagation()">
+      <input type="text" [(ngModel)]="replyText" placeholder="Reply..." 
+        (focus)="pauseStory()" (blur)="resumeStory()" (keyup.enter)="sendReply()" class="reply-input">
+      <ion-button fill="clear" color="light" class="send-btn" (click)="sendReply()" *ngIf="replyText">
+        <ion-icon name="send" slot="icon-only"></ion-icon>
+      </ion-button>
+    </div>
+
+  </div>
+
+  <!-- Viewers Modal -->
+  <ion-modal [isOpen]="showViewers" (didDismiss)="closeViewers()" [initialBreakpoint]="0.5" [breakpoints]="[0, 0.5, 0.8]">
+    <ng-template>
+      <ion-header>
+        <ion-toolbar>
+          <ion-title>Viewed by</ion-title>
+          <ion-buttons slot="end">
+            <ion-button (click)="closeViewers()">Close</ion-button>
+          </ion-buttons>
+        </ion-toolbar>
+      </ion-header>
+      <ion-content>
+        <ion-list>
+          <ion-item *ngFor="let viewer of viewers">
+            <app-avatar slot="start" [src]="viewer.avatar" [name]="viewer.name" [size]="40"></app-avatar>
+            <ion-label>
+              <h2>{{ viewer.name }}</h2>
+            </ion-label>
+          </ion-item>
+          <ion-item *ngIf="viewers.length === 0" lines="none">
+            <ion-label class="ion-text-center" color="medium">No views yet</ion-label>
+          </ion-item>
+        </ion-list>
+      </ion-content>
+    </ng-template>
+  </ion-modal>
+
+</div>

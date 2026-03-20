@@ -1,0 +1,41 @@
+<ion-header class="ion-no-border translucent">
+  <ion-toolbar color="transparent">
+    <ion-buttons slot="start">
+      <ion-button (click)="dismiss()">
+        <ion-icon name="close"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+    <ion-title>Contact info</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="profile-content">
+  <div class="profile-header">
+    <app-avatar [src]="user?.avatar" [name]="user?.name" [size]="150" class="large-avatar"></app-avatar>
+    <h2>{{ user?.name || 'Contact' }}</h2>
+    <p>{{ user?.mobile }}</p>
+    
+    <div class="action-buttons">
+      <div class="action-btn">
+        <ion-icon name="call"></ion-icon>
+        <span>Audio</span>
+      </div>
+      <div class="action-btn">
+        <ion-icon name="videocam"></ion-icon>
+        <span>Video</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="info-section">
+    <h3>About and phone number</h3>
+    <div class="info-item">
+      <p class="about-text">{{ user?.about || 'Hey there! I am using TalkSpot.' }}</p>
+      <span>About</span>
+    </div>
+    <div class="info-item">
+      <p class="phone-text">{{ user?.mobile }}</p>
+      <span>Mobile</span>
+    </div>
+  </div>
+</ion-content>

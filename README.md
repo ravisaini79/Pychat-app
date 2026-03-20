@@ -25,6 +25,7 @@ python -m venv venv
 venv\Scripts\activate   # Windows
 # source venv/bin/activate   # macOS/Linux
 pip install -r requirements.txt
+.\venv\Scripts\uvicorn.exe app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 2. Copy environment file and set your MongoDB URL and secret:

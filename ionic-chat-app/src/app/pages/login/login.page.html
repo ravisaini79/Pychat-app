@@ -1,0 +1,54 @@
+<ion-content [fullscreen]="true">
+  <div class="login-wrapper">
+    <div class="top-section">
+      <div class="logo-circle">
+        <ion-icon name="chatbubbles"></ion-icon>
+      </div>
+      <h1>TalkSpot</h1>
+      <p>Enter your phone number to continue</p>
+    </div>
+
+    <div class="form-container">
+      <div class="phone-input-group">
+        <div class="country-code-selector">
+          <span>+91</span>
+          <ion-icon name="chevron-down-outline"></ion-icon>
+        </div>
+        <ion-item lines="none" class="phone-item">
+          <ion-input
+            type="tel"
+            placeholder="Phone number"
+            [(ngModel)]="mobile"
+            name="mobile"
+            maxlength="10"
+          ></ion-input>
+        </ion-item>
+      </div>
+
+      <ion-item lines="none" class="password-item">
+        <ion-input
+          [type]="showPassword ? 'text' : 'password'"
+          placeholder="Password"
+          [(ngModel)]="password"
+          name="password"
+        ></ion-input>
+        <ion-button fill="clear" slot="end" (click)="togglePassword()">
+          <ion-icon [name]="showPassword ? 'eye-off-outline' : 'eye-outline'"></ion-icon>
+        </ion-button>
+      </ion-item>
+
+      <p class="terms-text">
+        TalkSpot will send an SMS message to verify your phone number. Carrier rates may apply.
+      </p>
+
+      <ion-button expand="block" class="primary-button" (click)="onLogin()" [disabled]="isLoading">
+        <ion-spinner *ngIf="isLoading" name="crescent"></ion-spinner>
+        <span *ngIf="!isLoading">Next</span>
+      </ion-button>
+
+      <div class="footer-links">
+        <p>New to TalkSpot? <a (click)="goToRegister()">Register here</a></p>
+      </div>
+    </div>
+  </div>
+</ion-content>
